@@ -38,63 +38,42 @@ Local development writes cron content to `tmp/pi-agent-jobs` in the command abov
 
 These steps install Pi Scheduler on an Ubuntu machine. They also work inside an Ubuntu LXC container, because LXC is just a Linux container environment.
 
-First install and configure the Pi CLI for the same Linux user that will run Pi Scheduler. After installing Pi, create a stable `/usr/local/bin/pi` wrapper so both `systemd` and `cron` can find Pi in a minimal environment. Replace `PI_NODE_BIN` with the directory that contains both `pi` and `node` on your machine.
+Install and configure the Pi CLI first. Before installing Pi Scheduler, verify that `pi` and `node` work from the minimal `PATH` used by `systemd` and cron:
 
 ```bash
 command -v pi
+command -v node
 pi --version
-
-PI_NODE_BIN="$(dirname "$(command -v pi)")"
-sudo tee /usr/local/bin/pi >/dev/null <<EOF
-#!/bin/sh
-PI_NODE_BIN=$PI_NODE_BIN
-export PATH="\$PI_NODE_BIN:/usr/local/bin:/usr/bin:/bin"
-exec "\$PI_NODE_BIN/pi" "\$@"
-EOF
-sudo chmod +x /usr/local/bin/pi
-
 env -i PATH=/usr/local/bin:/usr/bin:/bin pi --version
 ```
 
-The final `env -i ... pi --version` check is important. It simulates the clean environment used by `systemd` and cron. If it fails, scheduled jobs and manual `Run Now` can fail even when `pi --version` works in your login shell.
+If the final check hangs or fails, fix the Pi CLI installation before continuing.
 
 ```bash
 sudo apt update
-sudo apt install -y git python3-venv cron
+sudo apt install -y git python3-venv cron tmux
 sudo git clone https://github.com/benj1m1/pi-scheduler.git /opt/pi-scheduler
 cd /opt/pi-scheduler
 sudo python3 -m venv .venv
 sudo .venv/bin/pip install -r requirements.txt
 sudo chmod +x /opt/pi-scheduler/bin/pi-job-runner
 sudo cp deploy/pi-scheduler-web.service /etc/systemd/system/pi-scheduler-web.service
+```
+
+If you are installing over SSH, you can run the install commands inside tmux:
+
+```bash
+tmux new -s pi-scheduler
+```
+
+Edit `/etc/systemd/system/pi-scheduler-web.service` before starting the service:
+
+- Set a real `PI_SCHEDULER_PASSWORD`.
+- Change the `--host` value if you want to expose the web UI beyond localhost.
+
+```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now pi-scheduler-web.service
-```
-
-Edit `/etc/systemd/system/pi-scheduler-web.service` and set a real `PI_SCHEDULER_PASSWORD` before enabling access beyond localhost.
-
-For better secret handling, put credentials in a root-readable environment file instead of leaving the password directly in the service unit:
-
-```bash
-sudo mkdir -p /etc/pi-scheduler
-sudo tee /etc/pi-scheduler/pi-scheduler.env >/dev/null <<'EOF'
-PI_SCHEDULER_USERNAME=admin
-PI_SCHEDULER_PASSWORD=change-this-password
-EOF
-sudo chmod 600 /etc/pi-scheduler/pi-scheduler.env
-```
-
-Then replace the username/password `Environment=` lines in `/etc/systemd/system/pi-scheduler-web.service` with:
-
-```ini
-EnvironmentFile=/etc/pi-scheduler/pi-scheduler.env
-```
-
-After editing the service, reload and restart it:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl restart pi-scheduler-web.service
 ```
 
 The machine must have the system cron daemon installed and running:
@@ -208,28 +187,5 @@ Environment variables:
 The web app only manages `/etc/cron.d/pi-agent-jobs`. It does not edit user crontabs or other system cron files.
 
 If `Next` updates but no scheduled runs appear, check that `/etc/cron.d/pi-agent-jobs` exists and that `cron.service` is active.
-
-## Troubleshooting
-
-If a run fails with `[Errno 2] No such file or directory: 'pi'`, the web service or cron job cannot find the Pi executable. Create or fix `/usr/local/bin/pi`, then verify it in a clean environment:
-
-```bash
-env -i PATH=/usr/local/bin:/usr/bin:/bin pi --version
-```
-
-If that command fails with `/usr/bin/env: 'node': No such file or directory`, Pi was found but its bundled Node runtime was not. Update `/usr/local/bin/pi` so it exports the directory that contains both `pi` and `node` before executing Pi:
-
-```bash
-sudo tee /usr/local/bin/pi >/dev/null <<'EOF'
-#!/bin/sh
-PI_NODE_BIN=/root/.local/share/pi-node/node-v22.23.1-linux-x64/bin
-export PATH="$PI_NODE_BIN:/usr/local/bin:/usr/bin:/bin"
-exec "$PI_NODE_BIN/pi" "$@"
-EOF
-sudo chmod +x /usr/local/bin/pi
-env -i PATH=/usr/local/bin:/usr/bin:/bin pi --version
-```
-
-Adjust `PI_NODE_BIN` to match your installation. You can usually find it with `dirname "$(command -v pi)"` in a login shell where Pi works.
 
 Pi Scheduler, the Pi CLI, `~/.pi/agent/models.json`, and `~/.pi/agent/skills/` should belong to the same runtime user. If the service runs as a dedicated user, install or configure Pi under that user's home directory, or set `PI_MODELS_FILE` to the intended read-only model config path.

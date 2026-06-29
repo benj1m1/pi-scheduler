@@ -4,7 +4,7 @@
 <section class="panel">
   <h1>Run {{ run.id }}</h1>
   <dl class="wide">
-    <dt>Job</dt><dd><a href="/jobs/{{ run.job_id }}">{{ run.job_id }}</a></dd>
+    <dt>Job</dt><dd><a href="/jobs/{{ run.job_id }}">{{ job.name if job else run.job_id }}</a></dd>
     <dt>Source</dt><dd>{{ 'manual' if run.source == 'manual' else 'auto' }}</dd>
     <dt>Status</dt><dd>{{ run.status }}</dd>
     <dt>Started</dt><dd>{{ run.started_at|beijing_time }}</dd>

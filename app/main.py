@@ -477,6 +477,7 @@ def run_detail(request: Request, run_id: str):
     run = db.get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
+    job = db.get_job(run["job_id"])
     stdout = read_log(run.get("stdout_path"))
     stderr = read_log(run.get("stderr_path"))
     jsonl = read_log(run.get("jsonl_path"))
@@ -487,6 +488,7 @@ def run_detail(request: Request, run_id: str):
         {
             "request": request,
             "run": run,
+            "job": job,
             "stdout": stdout,
             "stderr": stderr,
             "jsonl": jsonl,

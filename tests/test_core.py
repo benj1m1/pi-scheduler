@@ -1000,6 +1000,65 @@ def test_run_detail_marks_whether_jsonl_is_available(tmp_path, monkeypatch):
     assert events_response.context["has_jsonl"] is True
 
 
+def test_run_detail_displays_current_job_name_after_rename(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "pi-test",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+        }
+    )
+    db.update_job(
+        job_id,
+        {
+            "name": "skill@servicenow-agent - loop queue",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+            "output_mode": "summary",
+            "session_mode": "no_session",
+            "tool_mode": "full",
+        },
+    )
+    db.insert_run(
+        {
+            "id": "20260629T143613Z-c128de6a-pi-test",
+            "job_id": job_id,
+            "started_at": "2026-06-29T14:36:13Z",
+            "status": "success",
+            "duration_ms": 1000,
+            "command": "pi",
+        }
+    )
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/runs/20260629T143613Z-c128de6a-pi-test",
+            "headers": [],
+        }
+    )
+    response = web.run_detail(request, "20260629T143613Z-c128de6a-pi-test")
+    html = web.templates.env.get_template("run_detail.html").render(response.context)
+
+    assert '<a href="/jobs/pi-test">skill@servicenow-agent - loop queue</a>' in html
+    assert '<a href="/jobs/pi-test">pi-test</a>' not in html
+
+
 def test_cleanup_old_logs_removes_old_run_files_and_records(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
     monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
