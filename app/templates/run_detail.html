@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Run {{ run.id }} - Pi Scheduler{% endblock %}
+{% block content %}
+<section class="panel">
+  <h1>Run {{ run.id }}</h1>
+  <dl class="wide">
+    <dt>Job</dt><dd><a href="/jobs/{{ run.job_id }}">{{ run.job_id }}</a></dd>
+    <dt>Source</dt><dd>{{ 'manual' if run.source == 'manual' else 'auto' }}</dd>
+    <dt>Status</dt><dd>{{ run.status }}</dd>
+    <dt>Started</dt><dd>{{ run.started_at|beijing_time }}</dd>
+    <dt>Finished</dt><dd>{{ run.finished_at|beijing_time }}</dd>
+    <dt>Duration</dt><dd>{{ run.duration_ms|seconds_duration }} s</dd>
+    <dt>Exit code</dt><dd>{{ run.exit_code if run.exit_code is not none else '' }}</dd>
+    <dt>Command</dt><dd><code>{{ run.command }}</code></dd>
+    <dt>Error</dt><dd>{{ run.error_summary or '' }}</dd>
+  </dl>
+</section>
+<section class="panel">
+  <div class="log-head">
+    <h2>{{ 'stdout transcript' if has_jsonl else 'summary output' }}</h2>
+    <button type="button" class="copy-log" data-copy-target="stdout-log">Copy</button>
+  </div>
+  <pre id="stdout-log" class="log-box">{{ stdout }}</pre>
+</section>
+<section class="panel">
+  <div class="log-head">
+    <h2>stderr</h2>
+    <button type="button" class="copy-log" data-copy-target="stderr-log">Copy</button>
+  </div>
+  <pre id="stderr-log" class="log-box">{{ stderr }}</pre>
+</section>
+{% if has_jsonl %}
+<section class="panel">
+  <div class="log-head">
+    <h2>Pi event JSONL</h2>
+    <button type="button" class="copy-log" data-copy-target="jsonl-log">Copy</button>
+  </div>
+  <p class="hint">Raw Pi agent event stream captured from <code>pi --mode json</code>.</p>
+  <pre id="jsonl-log" class="log-box">{{ jsonl }}</pre>
+</section>
+{% endif %}
+<script>
+  document.querySelectorAll(".copy-log").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const target = document.getElementById(button.dataset.copyTarget);
+      if (!target) return;
+
+      const originalText = button.textContent;
+      try {
+        await navigator.clipboard.writeText(target.textContent || "");
+        button.textContent = "Copied";
+      } catch {
+        const selection = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(target);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        document.execCommand("copy");
+        selection.removeAllRanges();
+        button.textContent = "Copied";
+      }
+
+      window.setTimeout(() => {
+        button.textContent = originalText;
+      }, 1400);
+    });
+  });
+</script>
+{% endblock %}

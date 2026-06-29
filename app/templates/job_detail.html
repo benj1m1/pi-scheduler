@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+{% block title %}{{ job.name }} - Pi Scheduler{% endblock %}
+{% block content %}
+<section class="panel">
+  <div class="card-head">
+    <h1>{{ job.name }}</h1>
+    <span class="badge {{ 'ok' if job.enabled else 'muted' }}">{{ 'enabled' if job.enabled else 'disabled' }}</span>
+  </div>
+  <dl class="wide">
+    <dt>Prompt</dt><dd>{{ job.task_prompt }}</dd>
+    <dt>Model</dt><dd>{{ job.provider_name ~ '/' ~ job.model_id if job.provider_name and job.model_id else 'Pi default' }}</dd>
+    <dt>Output</dt><dd>{{ 'Detailed event log' if job.output_mode == 'events' else 'Summary only' }}</dd>
+    <dt>Pi session</dt><dd>{{ 'saved' if job.session_mode == 'save' else 'not saved' }}</dd>
+    <dt>Tool access</dt><dd>{{ 'Read-only tools' if job.tool_mode == 'read_only' else 'No tools' if job.tool_mode == 'no_tools' else 'Full tools' }}</dd>
+    <dt>Schedule</dt><dd>{{ job.cron_expr|describe_cron }}</dd>
+    <dt>Work window</dt><dd>{{ job.work_start|describe_work_window(job.work_end) }}</dd>
+    <dt>Cron</dt><dd><code>{{ job.cron_expr }}</code></dd>
+    <dt>Command</dt><dd><code>{{ command }}</code></dd>
+    {% if command_error %}<dt>Command error</dt><dd><span class="bad-text">{{ command_error }}</span></dd>{% endif %}
+    <dt>Timeout</dt><dd>{{ job.timeout_seconds }} seconds</dd>
+    <dt>Overlap</dt><dd>{{ 'prevented' if job.prevent_overlap else 'allowed' }}</dd>
+  </dl>
+  <div class="actions">
+    <a class="button" href="/jobs/{{ job.id }}/edit">Edit</a>
+    <form method="post" action="/jobs/{{ job.id }}/toggle"><button>{{ 'Disable' if job.enabled else 'Enable' }}</button></form>
+    <form id="run-now-form" method="post" action="/jobs/{{ job.id }}/run">
+      <button id="run-now-button" class="primary" {% if has_running_run %}disabled{% endif %}>{{ 'Running' if has_running_run else 'Run Now' }}</button>
+    </form>
+    <form method="post" action="/jobs/{{ job.id }}/delete"><button class="danger">Delete</button></form>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>Recent Runs</h2>
+  <div class="tabs">
+    {% for key, label in run_source_filters.items() %}
+    <a class="button run-source-tab {{ 'primary' if source == key else '' }}" data-source="{{ key }}" href="/jobs/{{ job.id }}?source={{ key }}">{{ label }}</a>
+    {% endfor %}
+  </div>
+  <div id="recent-runs" data-job-id="{{ job.id }}" data-page="{{ page }}" data-source="{{ source }}" data-initial-running="{{ 'true' if has_running_run else 'false' }}">
+  <table id="recent-runs-table" {% if not runs %}hidden{% endif %}>
+    <thead><tr><th>Started</th><th>Source</th><th>Status</th><th>Duration</th><th>Exit</th><th></th></tr></thead>
+    <tbody id="recent-runs-body">
+      {% for run in runs %}
+      <tr>
+        <td>{{ run.started_at|beijing_time }}</td>
+        <td>{{ 'manual' if run.source == 'manual' else 'auto' }}</td>
+        <td><span class="badge {{ 'ok' if run.status == 'success' else 'bad' if run.status in ['failed', 'timeout'] else 'muted' }}">{{ run.status }}</span></td>
+        <td>{{ run.duration_ms|seconds_duration }} s</td>
+        <td>{{ run.exit_code if run.exit_code is not none else '' }}</td>
+        <td><a href="/runs/{{ run.id }}">View</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p id="recent-runs-empty" {% if runs %}hidden{% endif %}>{{ 'No runs on this page.' if page > 1 else 'No runs yet.' }}</p>
+  <div id="recent-runs-pagination" class="pagination">
+    <button id="previous-page" class="button" type="button" {% if page <= 1 %}disabled{% endif %}>Previous</button>
+    <label class="page-control" for="page-input">Page <input id="page-input" class="page-input" type="number" min="1" value="{{ page }}" inputmode="numeric"></label>
+    <button id="next-page" class="button" type="button" {% if not has_next_page %}disabled{% endif %}>Next</button>
+  </div>
+  </div>
+</section>
+<script>
+  const recentRuns = document.getElementById("recent-runs");
+  const runNowForm = document.getElementById("run-now-form");
+  const runNowButton = document.getElementById("run-now-button");
+  const runsTable = document.getElementById("recent-runs-table");
+  const runsBody = document.getElementById("recent-runs-body");
+  const runsEmpty = document.getElementById("recent-runs-empty");
+  const sourceTabs = Array.from(document.querySelectorAll(".run-source-tab"));
+  const previousPage = document.getElementById("previous-page");
+  const nextPage = document.getElementById("next-page");
+  const pageInput = document.getElementById("page-input");
+  const jobId = recentRuns.dataset.jobId;
+  const state = {
+    page: Number(recentRuns.dataset.page),
+    source: recentRuns.dataset.source,
+    hasNextPage: !nextPage.disabled,
+  };
+  const queuedAt = recentRuns.dataset.initialRunning === "true" ? Date.now() : 0;
+
+  function setRunning(isRunning) {
+    runNowButton.disabled = isRunning;
+    runNowButton.textContent = isRunning ? "Running" : "Run Now";
+  }
+
+  function cell(text) {
+    const element = document.createElement("td");
+    element.textContent = text ?? "";
+    return element;
+  }
+
+  function renderRuns(runs) {
+    runsBody.replaceChildren();
+    for (const run of runs) {
+      const row = document.createElement("tr");
+      row.appendChild(cell(run.started_at));
+      row.appendChild(cell(run.source));
+
+      const statusCell = document.createElement("td");
+      const badge = document.createElement("span");
+      badge.className = `badge ${run.status_class}`;
+      badge.textContent = run.status;
+      statusCell.appendChild(badge);
+      row.appendChild(statusCell);
+
+      row.appendChild(cell(`${run.duration} s`));
+      row.appendChild(cell(run.exit_code));
+
+      const viewCell = document.createElement("td");
+      const link = document.createElement("a");
+      link.href = run.url;
+      link.textContent = "View";
+      viewCell.appendChild(link);
+      row.appendChild(viewCell);
+      runsBody.appendChild(row);
+    }
+    runsTable.hidden = runs.length === 0;
+    runsEmpty.hidden = runs.length > 0;
+    runsEmpty.textContent = state.page > 1 ? "No runs on this page." : "No runs yet.";
+  }
+
+  function jobUrl() {
+    const params = new URLSearchParams({ source: state.source, page: String(state.page) });
+    return `/jobs/${encodeURIComponent(jobId)}?${params.toString()}`;
+  }
+
+  function renderPagination(hasNextPage) {
+    state.hasNextPage = hasNextPage;
+    previousPage.disabled = state.page <= 1;
+    nextPage.disabled = !hasNextPage;
+    if (document.activeElement !== pageInput) {
+      pageInput.value = String(state.page);
+    }
+  }
+
+  function renderSourceTabs() {
+    for (const tab of sourceTabs) {
+      tab.classList.toggle("primary", tab.dataset.source === state.source);
+      const params = new URLSearchParams({ source: tab.dataset.source, page: "1" });
+      tab.href = `/jobs/${encodeURIComponent(jobId)}?${params.toString()}`;
+    }
+  }
+
+  async function refreshRuns({ updateHistory = false, replaceHistory = false } = {}) {
+    if (document.hidden) return;
+    const params = new URLSearchParams({ source: state.source, page: String(state.page) });
+    const response = await fetch(`/jobs/${encodeURIComponent(jobId)}/runs/status?${params.toString()}`, {
+      credentials: "same-origin",
+      headers: { "Accept": "application/json" },
+    });
+    if (!response.ok) return;
+    const data = await response.json();
+    state.page = data.page;
+    const keepQueuedDisabled = queuedAt > 0 && Date.now() - queuedAt < 3000;
+    setRunning(data.has_running_run || keepQueuedDisabled);
+    renderRuns(data.runs);
+    renderPagination(data.has_next_page);
+    renderSourceTabs();
+    if (updateHistory) {
+      const method = replaceHistory ? "replaceState" : "pushState";
+      history[method]({ page: state.page, source: state.source }, "", jobUrl());
+    }
+  }
+
+  function goToPage(nextPage) {
+    const parsed = Number(nextPage);
+    if (!Number.isFinite(parsed) || parsed < 1) {
+      pageInput.value = String(state.page);
+      return;
+    }
+    state.page = Math.floor(parsed);
+    refreshRuns({ updateHistory: true });
+  }
+
+  function applyUrlState() {
+    const params = new URLSearchParams(window.location.search);
+    const page = Number(params.get("page") || "1");
+    const source = params.get("source") || "all";
+    state.page = Number.isFinite(page) && page >= 1 ? Math.floor(page) : 1;
+    state.source = ["all", "auto", "manual"].includes(source) ? source : "all";
+    refreshRuns({ updateHistory: true, replaceHistory: true });
+  }
+
+  runNowForm.addEventListener("submit", () => setRunning(true));
+  for (const tab of sourceTabs) {
+    tab.addEventListener("click", (event) => {
+      event.preventDefault();
+      state.source = tab.dataset.source;
+      state.page = 1;
+      refreshRuns({ updateHistory: true });
+    });
+  }
+  previousPage.addEventListener("click", () => goToPage(state.page - 1));
+  nextPage.addEventListener("click", () => goToPage(state.page + 1));
+  pageInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      goToPage(pageInput.value);
+      pageInput.blur();
+    }
+  });
+  pageInput.addEventListener("blur", () => {
+    pageInput.value = String(state.page);
+  });
+  window.addEventListener("popstate", applyUrlState);
+  setInterval(refreshRuns, 2000);
+  refreshRuns({ updateHistory: true, replaceHistory: true });
+</script>
+{% endblock %}

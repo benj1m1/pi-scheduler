@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} - Pi Scheduler{% endblock %}
+{% block content %}
+<section class="panel">
+  <h1>{{ title }}</h1>
+  {% if errors %}
+  <div class="errors">
+    {% for error in errors %}<p>{{ error }}</p>{% endfor %}
+  </div>
+  {% endif %}
+  <form class="stack" method="post" action="{{ action }}">
+    <label>Name <input name="name" value="{{ job.name }}" required></label>
+    <label>Prompt <textarea name="task_prompt" required placeholder="Summarize the latest system status">{{ job.task_prompt }}</textarea></label>
+    <fieldset>
+      <legend>Pi model</legend>
+      <label>Provider / model
+        <select name="model_selection">
+          <option value="" {% if not job.model_selection %}selected{% endif %}>Use Pi default</option>
+          {% for option in model_options %}
+          <option value="{{ option.value }}" {% if job.model_selection == option.value %}selected{% endif %}>
+            {{ option.provider }}/{{ option.id }}{% if option.name != option.id %} - {{ option.name }}{% endif %}
+          </option>
+          {% endfor %}
+        </select>
+      </label>
+      <p class="hint">Options are read-only from <code>{{ models_file }}</code>.</p>
+      {% if model_config_error %}<p class="hint bad-text">{{ model_config_error }}</p>{% endif %}
+    </fieldset>
+    <fieldset>
+      <legend>Run output</legend>
+      <label>Output mode
+        <select name="output_mode" required>
+          <option value="summary" {% if job.output_mode == 'summary' %}selected{% endif %}>Summary only</option>
+          <option value="events" {% if job.output_mode == 'events' %}selected{% endif %}>Detailed event log</option>
+        </select>
+      </label>
+      <p class="hint">Summary only uses <code>pi -p</code>. Detailed event log uses <code>pi --mode json</code> and stores the raw Pi event stream.</p>
+      <label>Session
+        <select name="session_mode" required>
+          <option value="no_session" {% if job.session_mode == 'no_session' %}selected{% endif %}>Do not save Pi session</option>
+          <option value="save" {% if job.session_mode == 'save' %}selected{% endif %}>Save Pi session</option>
+        </select>
+      </label>
+      <p class="hint">Saved sessions are named <code>pi-scheduler: {{ job.name or 'job name' }}</code>.</p>
+      <label>Tool access
+        <select name="tool_mode" required>
+          <option value="full" {% if job.tool_mode == 'full' %}selected{% endif %}>Full tools</option>
+          <option value="read_only" {% if job.tool_mode == 'read_only' %}selected{% endif %}>Read-only tools</option>
+          <option value="no_tools" {% if job.tool_mode == 'no_tools' %}selected{% endif %}>No tools</option>
+        </select>
+      </label>
+      <p class="hint">Read-only tools allow <code>read</code>, <code>grep</code>, <code>find</code>, and <code>ls</code>. No tools disables all Pi tools.</p>
+    </fieldset>
+    <fieldset>
+      <legend>Schedule</legend>
+      <div class="inline-fields">
+        <label>Every <input name="schedule_every" type="number" min="1" max="59" value="{{ job.schedule_every }}" required></label>
+        <label>Unit
+          <select name="schedule_unit" required>
+            <option value="minutes" {% if job.schedule_unit == 'minutes' %}selected{% endif %}>minutes</option>
+            <option value="hours" {% if job.schedule_unit == 'hours' %}selected{% endif %}>hours</option>
+          </select>
+        </label>
+      </div>
+      <p class="hint">Runs as app-owned cron. Minutes support 1-59; hours support 1-23.</p>
+    </fieldset>
+    <fieldset>
+      <legend>Work window</legend>
+      <div class="inline-fields">
+        <label>Start
+          <select id="work-start" name="work_start">
+            <option value="" {% if not job.work_start %}selected{% endif %}>All day</option>
+            {% for option in hour_options %}
+            <option value="{{ option.value }}" {% if job.work_start == option.value %}selected{% endif %}>{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>End
+          <select id="work-end" name="work_end">
+            <option value="" {% if not job.work_end %}selected{% endif %}>All day</option>
+            {% for option in hour_options %}
+            <option value="{{ option.value }}" {% if job.work_end == option.value %}selected{% endif %}>{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+      <p class="hint">Uses Beijing time. Leave both as All day for no work-window limit. The start hour is included; the end hour is excluded.</p>
+      <p id="work-window-status" class="window-status" aria-live="polite"></p>
+    </fieldset>
+    <label>Timeout seconds <input name="timeout_seconds" type="number" min="10" max="3600" value="{{ job.timeout_seconds }}" required></label>
+    <label class="check"><input type="checkbox" name="enabled" {% if job.enabled %}checked{% endif %}> Enabled</label>
+    <label class="check forced-check"><input type="checkbox" name="prevent_overlap" checked disabled> Prevent overlap</label>
+    <div class="actions">
+      <button class="primary" type="submit">Save</button>
+      <a class="button" href="/">Cancel</a>
+    </div>
+  </form>
+</section>
+<script>
+  (() => {
+    const start = document.getElementById("work-start");
+    const end = document.getElementById("work-end");
+    const status = document.getElementById("work-window-status");
+    if (!start || !end || !status) return;
+
+    const updateStatus = () => {
+      if (!start.value && !end.value) {
+        status.textContent = "All day";
+        status.className = "window-status muted-text";
+        return;
+      }
+      if (!start.value || !end.value) {
+        status.textContent = "Select both start and end, or leave both as All day.";
+        status.className = "window-status bad-text";
+        return;
+      }
+      if (start.value === end.value) {
+        status.textContent = "Start and end must be different.";
+        status.className = "window-status bad-text";
+        return;
+      }
+      if (start.value > end.value) {
+        status.textContent = "Overnight window";
+        status.className = "window-status badge muted";
+        return;
+      }
+      status.textContent = "Same-day window";
+      status.className = "window-status muted-text";
+    };
+
+    start.addEventListener("change", updateStatus);
+    end.addEventListener("change", updateStatus);
+    updateStatus();
+  })();
+</script>
+{% endblock %}

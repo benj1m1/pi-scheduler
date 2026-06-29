@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Jobs - Pi Scheduler{% endblock %}
+{% block content %}
+<section class="hero">
+  <h1>Scheduled Pi Tasks</h1>
+  <p>Manage app-owned cron jobs that run Pi prompts and write structured logs.</p>
+</section>
+
+{% if jobs %}
+<div class="cards">
+  {% for job in jobs %}
+  <article class="card">
+    <div class="card-head">
+      <h2><a href="/jobs/{{ job.id }}">{{ job.name }}</a></h2>
+      <span class="badge {{ 'ok' if job.enabled else 'muted' }}">{{ 'enabled' if job.enabled else 'disabled' }}</span>
+    </div>
+    <dl>
+      <dt>Prompt</dt><dd class="prompt-preview">{{ job.task_prompt|truncate(220, true) }}</dd>
+      <dt>Model</dt><dd>{{ job.provider_name ~ '/' ~ job.model_id if job.provider_name and job.model_id else 'Pi default' }}</dd>
+      <dt>Schedule</dt><dd>{{ job.cron_expr|describe_cron }}</dd>
+      <dt>Work</dt><dd>{{ job.work_start|describe_work_window(job.work_end) }}</dd>
+      <dt>Next check</dt><dd>{{ job.next_run|beijing_time or 'not scheduled' }}</dd>
+      <dt>Last</dt><dd>{{ job.last_status or 'never run' }} {{ job.last_finished_at|beijing_time }}</dd>
+    </dl>
+    <div class="actions">
+      <a class="button" href="/jobs/{{ job.id }}">Details</a>
+      <form method="post" action="/jobs/{{ job.id }}/toggle"><button>{{ 'Disable' if job.enabled else 'Enable' }}</button></form>
+      <form method="post" action="/jobs/{{ job.id }}/run"><button>Run Now</button></form>
+    </div>
+  </article>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty">
+  <p>No jobs yet.</p>
+  <a class="button primary" href="/jobs/new">Create the first job</a>
+</div>
+{% endif %}
+{% endblock %}

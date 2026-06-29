@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Cron Preview - Pi Scheduler{% endblock %}
+{% block content %}
+<section class="panel">
+  <h1>Cron Preview</h1>
+  <p>Target file: <code>{{ cron_file }}</code></p>
+  {% if error %}<div class="errors"><p>{{ error }}</p></div>{% endif %}
+  <pre>{{ content }}</pre>
+</section>
+{% endblock %}

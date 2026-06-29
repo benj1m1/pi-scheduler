@@ -1,0 +1,16 @@
+[project]
+name = "pi-scheduler"
+version = "0.1.0"
+description = "Personal cron web panel for recurring Pi agent skill runs"
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi>=0.111",
+  "uvicorn>=0.30",
+  "jinja2>=3.1",
+  "python-multipart>=0.0.9",
+  "croniter>=2.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

@@ -1,0 +1,580 @@
+from __future__ import annotations
+
+import secrets
+import math
+from datetime import datetime
+from pathlib import Path
+from typing import Annotated
+from zoneinfo import ZoneInfo
+
+from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Query, Request, status
+from fastapi.responses import RedirectResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+
+from . import config, cron, db, pi_models, retention, runner, work_window
+
+
+app = FastAPI(title="Pi Scheduler")
+security = HTTPBasic()
+templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
+BEIJING_TZ = ZoneInfo("Asia/Shanghai")
+RUNS_PER_PAGE = 10
+LOG_PREVIEW_BYTES = 200 * 1024
+RUN_SOURCE_FILTERS = {
+    "all": "All",
+    "auto": "Automatic",
+    "manual": "Manual",
+}
+OUTPUT_MODES = {"summary", "events"}
+SESSION_MODES = {"save", "no_session"}
+TOOL_MODES = {"full", "read_only", "no_tools"}
+OLD_LOGS_CONFIRMATION = "DELETE OLD LOGS"
+ALL_LOGS_CONFIRMATION = "DELETE ALL LOGS"
+
+
+def hour_options() -> list[dict[str, str]]:
+    options = []
+    for hour in range(24):
+        suffix = "AM" if hour < 12 else "PM"
+        display_hour = hour % 12 or 12
+        options.append({"value": f"{hour:02d}:00", "label": f"{display_hour}:00 {suffix}"})
+    return options
+
+
+def beijing_time(value: str | None) -> str:
+    if not value:
+        return ""
+    parsed = value.replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(parsed)
+    except ValueError:
+        return value
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=BEIJING_TZ)
+    return dt.astimezone(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S Beijing")
+
+
+def seconds_duration(value: int | None) -> str:
+    return str(math.ceil((value or 0) / 1000))
+
+
+def run_status_class(status_value: str) -> str:
+    if status_value == "success":
+        return "ok"
+    if status_value in {"failed", "timeout"}:
+        return "bad"
+    return "muted"
+
+
+def format_run_summary(run: dict) -> dict:
+    return {
+        "id": run["id"],
+        "started_at": beijing_time(run.get("started_at")),
+        "source": "manual" if run.get("source") == "manual" else "auto",
+        "status": run.get("status", ""),
+        "status_class": run_status_class(run.get("status", "")),
+        "duration": seconds_duration(run.get("duration_ms")),
+        "exit_code": run.get("exit_code"),
+        "url": f"/runs/{run['id']}",
+    }
+
+
+templates.env.filters["beijing_time"] = beijing_time
+templates.env.filters["seconds_duration"] = seconds_duration
+templates.env.filters["describe_cron"] = cron.describe_cron
+templates.env.filters["describe_work_window"] = work_window.describe
+
+
+def require_auth(credentials: Annotated[HTTPBasicCredentials, Depends(security)]) -> str:
+    username_ok = secrets.compare_digest(credentials.username, config.ADMIN_USERNAME)
+    password_ok = secrets.compare_digest(credentials.password, config.ADMIN_PASSWORD)
+    if not (username_ok and password_ok):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return credentials.username
+
+
+@app.on_event("startup")
+def startup() -> None:
+    db.init_db()
+    retention.cleanup_old_logs()
+    cron.write_cron_file()
+
+
+def redirect_to(path: str) -> RedirectResponse:
+    return RedirectResponse(path, status_code=status.HTTP_303_SEE_OTHER)
+
+
+def parse_bool(value: str | None) -> int:
+    return 1 if value in {"on", "1", "true", "yes"} else 0
+
+
+def validate_job_form(data: dict) -> list[str]:
+    errors: list[str] = []
+    for field, label in [
+        ("name", "Name"),
+        ("task_prompt", "Prompt"),
+    ]:
+        if not data[field].strip():
+            errors.append(f"{label} is required")
+    if data.get("schedule_error"):
+        errors.append(data["schedule_error"])
+    elif data.get("cron_expr"):
+        try:
+            cron.validate_cron_expr(data["cron_expr"])
+        except ValueError as exc:
+            errors.append(str(exc))
+    if data.get("model_error"):
+        errors.append(data["model_error"])
+    else:
+        try:
+            pi_models.validate_selection(data.get("provider_name"), data.get("model_id"))
+        except pi_models.ModelConfigError as exc:
+            errors.append(str(exc))
+    try:
+        work_window.validate(data.get("work_start"), data.get("work_end"))
+    except ValueError as exc:
+        errors.append(str(exc))
+    if data.get("output_mode") not in OUTPUT_MODES:
+        errors.append("Output mode is invalid")
+    if data.get("session_mode") not in SESSION_MODES:
+        errors.append("Session mode is invalid")
+    if data.get("tool_mode") not in TOOL_MODES:
+        errors.append("Tool access is invalid")
+    try:
+        timeout = int(data["timeout_seconds"])
+        if timeout < 10 or timeout > 3600:
+            errors.append("Timeout must be between 10 and 3600 seconds")
+    except ValueError:
+        errors.append("Timeout must be a number")
+    return errors
+
+
+def form_data(
+    name: str,
+    task_prompt: str,
+    schedule_every: str,
+    schedule_unit: str,
+    model_selection: str,
+    output_mode: str,
+    session_mode: str,
+    tool_mode: str,
+    work_start: str,
+    work_end: str,
+    timeout_seconds: str,
+    enabled: str | None,
+    prevent_overlap: str | None,
+) -> dict:
+    cron_expr = ""
+    schedule_error = None
+    try:
+        cron_expr = cron.interval_to_cron(schedule_every.strip(), schedule_unit)
+    except ValueError as exc:
+        schedule_error = str(exc)
+    provider_name = None
+    model_id = None
+    model_error = None
+    try:
+        provider_name, model_id = pi_models.decode_selection(model_selection)
+    except pi_models.ModelConfigError as exc:
+        model_error = str(exc)
+    return {
+        "name": name.strip(),
+        "skill_name": "general",
+        "task_prompt": task_prompt.strip(),
+        "cron_expr": cron_expr,
+        "schedule_every": schedule_every.strip(),
+        "schedule_unit": schedule_unit,
+        "schedule_error": schedule_error,
+        "provider_name": provider_name,
+        "model_id": model_id,
+        "model_selection": model_selection,
+        "model_error": model_error,
+        "output_mode": output_mode,
+        "session_mode": session_mode,
+        "tool_mode": tool_mode,
+        "work_start": work_start.strip() or None,
+        "work_end": work_end.strip() or None,
+        "timeout_seconds": timeout_seconds.strip(),
+        "enabled": parse_bool(enabled),
+        "prevent_overlap": 1,
+    }
+
+
+def with_schedule(job: dict) -> dict:
+    job = dict(job)
+    schedule = cron.cron_to_interval(job.get("cron_expr", "*/5 * * * *"))
+    job["schedule_every"] = schedule["every"]
+    job["schedule_unit"] = schedule["unit"]
+    if job.get("provider_name") and job.get("model_id"):
+        job["model_selection"] = pi_models.encode_selection(job["provider_name"], job["model_id"])
+    else:
+        job["model_selection"] = ""
+    job["work_start"] = job.get("work_start") or ""
+    job["work_end"] = job.get("work_end") or ""
+    job["output_mode"] = job.get("output_mode") or "summary"
+    job["session_mode"] = job.get("session_mode") or "no_session"
+    job["tool_mode"] = job.get("tool_mode") or "full"
+    return job
+
+
+def job_form_context(request: Request, job: dict, errors: list[str], action: str, title: str) -> dict:
+    model_config_error = None
+    try:
+        model_options = pi_models.list_configured_models()
+    except pi_models.ModelConfigError as exc:
+        model_options = []
+        model_config_error = str(exc)
+    return {
+        "request": request,
+        "job": job,
+        "errors": errors,
+        "action": action,
+        "title": title,
+        "model_options": model_options,
+        "model_config_error": model_config_error,
+        "models_file": str(config.PI_MODELS_FILE),
+        "hour_options": hour_options(),
+    }
+
+
+@app.get("/", dependencies=[Depends(require_auth)])
+def index(request: Request):
+    jobs = db.list_jobs()
+    for job in jobs:
+        job["next_run"] = cron.next_run(job["cron_expr"]) if job.get("enabled") else None
+    return templates.TemplateResponse(request, "index.html", {"request": request, "jobs": jobs})
+
+
+@app.get("/jobs/new", dependencies=[Depends(require_auth)])
+def new_job(request: Request):
+    job = {
+        "name": "",
+        "task_prompt": "",
+        "cron_expr": "*/5 * * * *",
+        "schedule_every": "5",
+        "schedule_unit": "minutes",
+        "provider_name": None,
+        "model_id": None,
+        "model_selection": "",
+        "work_start": "",
+        "work_end": "",
+        "timeout_seconds": 240,
+        "enabled": 1,
+        "prevent_overlap": 1,
+        "output_mode": "summary",
+        "session_mode": "no_session",
+        "tool_mode": "full",
+    }
+    return templates.TemplateResponse(
+        request,
+        "job_form.html",
+        job_form_context(request, job, [], "/jobs", "New Job"),
+    )
+
+
+@app.post("/jobs", dependencies=[Depends(require_auth)])
+def create_job(
+    request: Request,
+    name: Annotated[str, Form()],
+    task_prompt: Annotated[str, Form()],
+    schedule_every: Annotated[str, Form()],
+    schedule_unit: Annotated[str, Form()],
+    timeout_seconds: Annotated[str, Form()],
+    work_start: Annotated[str, Form()] = "",
+    work_end: Annotated[str, Form()] = "",
+    model_selection: Annotated[str, Form()] = "",
+    output_mode: Annotated[str, Form()] = "summary",
+    session_mode: Annotated[str, Form()] = "no_session",
+    tool_mode: Annotated[str, Form()] = "full",
+    enabled: Annotated[str | None, Form()] = None,
+    prevent_overlap: Annotated[str | None, Form()] = None,
+):
+    data = form_data(
+        name,
+        task_prompt,
+        schedule_every,
+        schedule_unit,
+        model_selection,
+        output_mode,
+        session_mode,
+        tool_mode,
+        work_start,
+        work_end,
+        timeout_seconds,
+        enabled,
+        prevent_overlap,
+    )
+    errors = validate_job_form(data)
+    if errors:
+        return templates.TemplateResponse(
+            request,
+            "job_form.html",
+            job_form_context(request, data, errors, "/jobs", "New Job"),
+            status_code=400,
+        )
+    data["timeout_seconds"] = int(data["timeout_seconds"])
+    job_id = db.create_job(data)
+    cron.write_cron_file()
+    return redirect_to(f"/jobs/{job_id}")
+
+
+@app.get("/jobs/{job_id}", dependencies=[Depends(require_auth)])
+def job_detail(
+    request: Request,
+    job_id: str,
+    page: Annotated[int, Query(ge=1)] = 1,
+    source: Annotated[str, Query(pattern="^(all|auto|manual)$")] = "all",
+    queued: Annotated[int, Query(ge=0, le=1)] = 0,
+):
+    job = db.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    run_source = None if source == "all" else source
+    runs_page = db.list_recent_runs(job_id, RUNS_PER_PAGE + 1, (page - 1) * RUNS_PER_PAGE, run_source)
+    runs = runs_page[:RUNS_PER_PAGE]
+    has_next_page = len(runs_page) > RUNS_PER_PAGE
+    command_error = None
+    try:
+        command = runner.build_command(job)[1]
+    except pi_models.ModelConfigError as exc:
+        command = runner.build_command(job, validate_model=False)[1]
+        command_error = str(exc)
+    return templates.TemplateResponse(
+        request,
+        "job_detail.html",
+        {
+            "request": request,
+            "job": job,
+            "runs": runs,
+            "command": command,
+            "command_error": command_error,
+            "page": page,
+            "has_next_page": has_next_page,
+            "source": source,
+            "run_source_filters": RUN_SOURCE_FILTERS,
+            "has_running_run": bool(queued) or db.has_running_run(job_id),
+        },
+    )
+
+
+@app.get("/jobs/{job_id}/runs/status", dependencies=[Depends(require_auth)])
+def job_runs_status(
+    job_id: str,
+    page: Annotated[int, Query(ge=1)] = 1,
+    source: Annotated[str, Query(pattern="^(all|auto|manual)$")] = "all",
+):
+    if db.get_job(job_id) is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    run_source = None if source == "all" else source
+    runs_page = db.list_recent_runs(job_id, RUNS_PER_PAGE + 1, (page - 1) * RUNS_PER_PAGE, run_source)
+    runs = runs_page[:RUNS_PER_PAGE]
+    return {
+        "has_running_run": db.has_running_run(job_id),
+        "runs": [format_run_summary(run) for run in runs],
+        "page": page,
+        "has_next_page": len(runs_page) > RUNS_PER_PAGE,
+    }
+
+
+@app.get("/jobs/{job_id}/edit", dependencies=[Depends(require_auth)])
+def edit_job(request: Request, job_id: str):
+    job = db.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return templates.TemplateResponse(
+        request,
+        "job_form.html",
+        job_form_context(request, with_schedule(job), [], f"/jobs/{job_id}", "Edit Job"),
+    )
+
+
+@app.post("/jobs/{job_id}", dependencies=[Depends(require_auth)])
+def update_job(
+    request: Request,
+    job_id: str,
+    name: Annotated[str, Form()],
+    task_prompt: Annotated[str, Form()],
+    schedule_every: Annotated[str, Form()],
+    schedule_unit: Annotated[str, Form()],
+    timeout_seconds: Annotated[str, Form()],
+    work_start: Annotated[str, Form()] = "",
+    work_end: Annotated[str, Form()] = "",
+    model_selection: Annotated[str, Form()] = "",
+    output_mode: Annotated[str, Form()] = "summary",
+    session_mode: Annotated[str, Form()] = "no_session",
+    tool_mode: Annotated[str, Form()] = "full",
+    enabled: Annotated[str | None, Form()] = None,
+    prevent_overlap: Annotated[str | None, Form()] = None,
+):
+    if db.get_job(job_id) is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    data = form_data(
+        name,
+        task_prompt,
+        schedule_every,
+        schedule_unit,
+        model_selection,
+        output_mode,
+        session_mode,
+        tool_mode,
+        work_start,
+        work_end,
+        timeout_seconds,
+        enabled,
+        prevent_overlap,
+    )
+    errors = validate_job_form(data)
+    if errors:
+        data["id"] = job_id
+        return templates.TemplateResponse(
+            request,
+            "job_form.html",
+            job_form_context(request, data, errors, f"/jobs/{job_id}", "Edit Job"),
+            status_code=400,
+        )
+    data["timeout_seconds"] = int(data["timeout_seconds"])
+    db.update_job(job_id, data)
+    cron.write_cron_file()
+    return redirect_to(f"/jobs/{job_id}")
+
+
+@app.post("/jobs/{job_id}/toggle", dependencies=[Depends(require_auth)])
+def toggle_job(job_id: str):
+    job = db.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    db.set_job_enabled(job_id, not bool(job["enabled"]))
+    cron.write_cron_file()
+    return redirect_to("/")
+
+
+@app.post("/jobs/{job_id}/delete", dependencies=[Depends(require_auth)])
+def delete_job(job_id: str):
+    if db.get_job(job_id) is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    db.soft_delete_job(job_id)
+    cron.write_cron_file()
+    return redirect_to("/")
+
+
+@app.post("/jobs/{job_id}/run", dependencies=[Depends(require_auth)])
+def manual_run(job_id: str, background_tasks: BackgroundTasks):
+    if db.get_job(job_id) is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    background_tasks.add_task(runner.run_job, job_id, source="manual")
+    return redirect_to(f"/jobs/{job_id}?queued=1")
+
+
+@app.get("/runs/{run_id}", dependencies=[Depends(require_auth)])
+def run_detail(request: Request, run_id: str):
+    run = db.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    stdout = read_log(run.get("stdout_path"))
+    stderr = read_log(run.get("stderr_path"))
+    jsonl = read_log(run.get("jsonl_path"))
+    has_jsonl = bool(run.get("jsonl_path"))
+    return templates.TemplateResponse(
+        request,
+        "run_detail.html",
+        {
+            "request": request,
+            "run": run,
+            "stdout": stdout,
+            "stderr": stderr,
+            "jsonl": jsonl,
+            "has_jsonl": has_jsonl,
+        },
+    )
+
+
+@app.get("/cron", dependencies=[Depends(require_auth)])
+def cron_preview(request: Request):
+    error = None
+    content = ""
+    try:
+        content = cron.render_cron_file()
+    except ValueError as exc:
+        error = str(exc)
+    return templates.TemplateResponse(
+        request,
+        "cron_preview.html",
+        {"request": request, "content": content, "error": error, "cron_file": str(config.CRON_FILE)},
+    )
+
+
+@app.get("/maintenance/logs", dependencies=[Depends(require_auth)])
+def maintenance_logs(request: Request):
+    return templates.TemplateResponse(
+        request,
+        "maintenance_logs.html",
+        {
+            "request": request,
+            "old_confirmation": OLD_LOGS_CONFIRMATION,
+            "all_confirmation": ALL_LOGS_CONFIRMATION,
+            "errors": [],
+            "result": None,
+        },
+    )
+
+
+@app.post("/maintenance/logs", dependencies=[Depends(require_auth)])
+def cleanup_logs(
+    request: Request,
+    mode: Annotated[str, Form()],
+    confirmation: Annotated[str, Form()],
+    days: Annotated[int, Form()] = 30,
+):
+    errors: list[str] = []
+    result = None
+
+    if mode == "older_than":
+        if days < 1:
+            errors.append("Days must be at least 1")
+        if confirmation != OLD_LOGS_CONFIRMATION:
+            errors.append(f'Type "{OLD_LOGS_CONFIRMATION}" to confirm deleting old run history')
+        if not errors:
+            result = retention.cleanup_runs_before(retention.cutoff_for_days(days))
+    elif mode == "all":
+        if confirmation != ALL_LOGS_CONFIRMATION:
+            errors.append(f'Type "{ALL_LOGS_CONFIRMATION}" to confirm deleting all run history')
+        if not errors:
+            result = retention.cleanup_all_runs()
+    else:
+        errors.append("Cleanup mode is invalid")
+
+    return templates.TemplateResponse(
+        request,
+        "maintenance_logs.html",
+        {
+            "request": request,
+            "old_confirmation": OLD_LOGS_CONFIRMATION,
+            "all_confirmation": ALL_LOGS_CONFIRMATION,
+            "errors": errors,
+            "result": result,
+            "mode": mode,
+            "days": days,
+        },
+    )
+
+
+def read_log(path: str | None, max_bytes: int = LOG_PREVIEW_BYTES) -> str:
+    if not path:
+        return ""
+    log_path = Path(path)
+    if not log_path.exists():
+        return "Log file not found"
+    size = log_path.stat().st_size
+    if size <= max_bytes:
+        return log_path.read_text(encoding="utf-8", errors="replace")
+    with log_path.open("rb") as handle:
+        handle.seek(-max_bytes, 2)
+        content = handle.read().decode("utf-8", errors="replace")
+    return f"[Showing last {max_bytes // 1024} KiB of {math.ceil(size / 1024)} KiB log]\n\n{content}"

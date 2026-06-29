@@ -1,0 +1,1179 @@
+import os
+from datetime import datetime, timezone
+from pathlib import Path
+
+os.environ.setdefault("PI_SCHEDULER_CRON_FILE", "/tmp/pi-agent-jobs-test")
+
+from starlette.requests import Request
+
+from app import config, cron, db, pi_models, retention, runner
+from app import main as web
+from app import work_window
+
+
+def test_slugify():
+    assert db.slugify("ServiceNow SOS Check") == "servicenow-sos-check"
+    assert db.slugify("!!!") == "job"
+
+
+def test_form_data_forces_overlap_prevention():
+    data = web.form_data(
+        "pi-agent",
+        "check logs",
+        "5",
+        "minutes",
+        "",
+        "summary",
+        "no_session",
+        "full",
+        "",
+        "",
+        "240",
+        "on",
+        None,
+    )
+
+    assert data["prevent_overlap"] == 1
+
+
+def test_db_forces_overlap_prevention(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "pi-agent",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 0,
+        }
+    )
+
+    assert db.get_job(job_id)["prevent_overlap"] == 1
+
+    db.update_job(
+        job_id,
+        {
+            "name": "pi-agent",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/10 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 0,
+        },
+    )
+    assert db.get_job(job_id)["prevent_overlap"] == 1
+
+    with db.connect() as conn:
+        conn.execute("update jobs set prevent_overlap = 0 where id = ?", (job_id,))
+    db.init_db()
+
+    assert db.get_job(job_id)["prevent_overlap"] == 1
+
+
+def test_db_defaults_new_jobs_to_summary_without_session(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "pi-agent",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+        }
+    )
+
+    job = db.get_job(job_id)
+
+    assert job["output_mode"] == "summary"
+    assert job["session_mode"] == "no_session"
+    assert job["tool_mode"] == "full"
+
+
+def test_db_migrates_existing_jobs_to_events_with_saved_sessions(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    with db.connect() as conn:
+        conn.execute(
+            """
+            create table jobs (
+              id text primary key,
+              name text not null,
+              skill_name text not null,
+              task_prompt text not null,
+              cron_expr text not null,
+              enabled integer not null default 1,
+              timeout_seconds integer not null default 240,
+              prevent_overlap integer not null default 1,
+              created_at text not null,
+              updated_at text not null,
+              deleted_at text
+            )
+            """
+        )
+        conn.execute(
+            """
+            insert into jobs (
+              id, name, skill_name, task_prompt, cron_expr, enabled, timeout_seconds,
+              prevent_overlap, created_at, updated_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "legacy-job",
+                "Legacy Job",
+                "general",
+                "check logs",
+                "*/5 * * * *",
+                1,
+                240,
+                1,
+                "2026-06-27T14:00:00Z",
+                "2026-06-27T14:00:00Z",
+            ),
+        )
+
+    db.init_db()
+
+    job = db.get_job("legacy-job")
+    assert job["output_mode"] == "events"
+    assert job["session_mode"] == "save"
+    assert job["tool_mode"] == "full"
+
+
+def test_build_command_uses_argv():
+    argv, display = runner.build_command(
+        {"task_prompt": "Run the servicenow-agent skill"}
+    )
+    assert argv[0] == "pi"
+    assert argv[1:3] == ["--mode", "json"]
+    assert argv[3] == "Run the servicenow-agent skill"
+    assert display.startswith("pi --mode json")
+
+
+def test_build_command_supports_summary_without_session():
+    argv, display = runner.build_command(
+        {
+            "name": "pi-agent",
+            "task_prompt": "summarize status",
+            "output_mode": "summary",
+            "session_mode": "no_session",
+        }
+    )
+
+    assert argv == [
+        "pi",
+        "--no-session",
+        "--name",
+        "pi-scheduler: pi-agent",
+        "-p",
+        "summarize status",
+    ]
+    assert "--no-session" in display
+    assert "-p" in display
+    assert "--mode json" not in display
+
+
+def test_build_command_supports_read_only_tools():
+    argv, display = runner.build_command(
+        {
+            "name": "pi-agent",
+            "task_prompt": "review status",
+            "output_mode": "summary",
+            "session_mode": "no_session",
+            "tool_mode": "read_only",
+        }
+    )
+
+    assert argv == [
+        "pi",
+        "--no-session",
+        "--tools",
+        "read,grep,find,ls",
+        "--name",
+        "pi-scheduler: pi-agent",
+        "-p",
+        "review status",
+    ]
+    assert "--tools read,grep,find,ls" in display
+
+
+def test_build_command_supports_no_tools():
+    argv, display = runner.build_command(
+        {
+            "task_prompt": "summarize status",
+            "output_mode": "summary",
+            "session_mode": "no_session",
+            "tool_mode": "no_tools",
+        }
+    )
+
+    assert argv == ["pi", "--no-session", "--no-tools", "-p", "summarize status"]
+    assert "--no-tools" in display
+
+
+def test_validate_job_form_rejects_invalid_tool_mode():
+    data = {
+        "name": "pi-agent",
+        "task_prompt": "check logs",
+        "cron_expr": "*/5 * * * *",
+        "provider_name": None,
+        "model_id": None,
+        "work_start": None,
+        "work_end": None,
+        "output_mode": "summary",
+        "session_mode": "no_session",
+        "tool_mode": "write_only",
+        "timeout_seconds": "240",
+    }
+
+    assert "Tool access is invalid" in web.validate_job_form(data)
+
+
+def test_list_configured_models_omits_provider_secrets(tmp_path, monkeypatch):
+    models_file = tmp_path / "models.json"
+    models_file.write_text(
+        '{"providers":{"local-llama":{"baseUrl":"https://example.invalid","apiKey":"dummy-api-key",'
+        '"models":[{"id":"qwen-local","name":"Qwen Local"}]}}}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config, "PI_MODELS_FILE", models_file)
+
+    options = pi_models.list_configured_models()
+
+    assert options == [
+        {
+            "provider": "local-llama",
+            "id": "qwen-local",
+            "name": "Qwen Local",
+            "value": pi_models.encode_selection("local-llama", "qwen-local"),
+        }
+    ]
+    assert "apiKey" not in options[0]
+    assert "baseUrl" not in options[0]
+
+
+def test_build_command_includes_configured_provider_model(tmp_path, monkeypatch):
+    models_file = tmp_path / "models.json"
+    models_file.write_text(
+        '{"providers":{"local-llama":{"models":[{"id":"qwen-local"}]}}}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config, "PI_MODELS_FILE", models_file)
+
+    argv, display = runner.build_command(
+        {
+            "task_prompt": "custom prompt",
+            "provider_name": "local-llama",
+            "model_id": "qwen-local",
+        }
+    )
+
+    assert argv[1:7] == ["--mode", "json", "--provider", "local-llama", "--model", "qwen-local"]
+    assert argv[7] == "custom prompt"
+    assert "--provider local-llama --model qwen-local" in display
+
+
+def test_build_command_rejects_unconfigured_provider_model(tmp_path, monkeypatch):
+    models_file = tmp_path / "models.json"
+    models_file.write_text('{"providers":{"local-llama":{"models":[{"id":"qwen-local"}]}}}', encoding="utf-8")
+    monkeypatch.setattr(config, "PI_MODELS_FILE", models_file)
+
+    try:
+        runner.build_command(
+            {
+                "task_prompt": "custom prompt",
+                "provider_name": "other-provider",
+                "model_id": "qwen-local",
+            }
+        )
+    except pi_models.ModelConfigError as exc:
+        assert "not configured" in str(exc)
+    else:
+        raise AssertionError("Expected ModelConfigError")
+
+
+def test_pi_events_to_transcript_includes_thinking_and_tools():
+    events = "\n".join(
+        [
+            '{"type":"agent_start"}',
+            '{"type":"message_end","message":{"role":"assistant","content":[{"type":"thinking","thinking":"plan work"},{"type":"text","text":"summary"}]}}',
+            '{"type":"tool_execution_end","toolName":"bash","result":{"output":"ok"},"isError":false}',
+        ]
+    )
+
+    transcript = runner.pi_events_to_transcript(events)
+
+    assert "[thinking]" in transcript
+    assert "plan work" in transcript
+    assert "summary" in transcript
+    assert "[tool end:bash error=False]" in transcript
+    assert '"output": "ok"' in transcript
+
+
+def test_render_cron_file():
+    content = cron.render_cron_file(
+        [
+            {
+                "id": "servicenow-sos-check",
+                "cron_expr": "*/5 * * * *",
+                "enabled": 1,
+                "deleted_at": None,
+            },
+            {
+                "id": "disabled",
+                "cron_expr": "*/5 * * * *",
+                "enabled": 0,
+                "deleted_at": None,
+            },
+        ]
+    )
+    assert "/bin/pi-job-runner --job-id servicenow-sos-check" in content
+    assert "--job-id disabled" not in content
+
+
+def test_validate_cron_expr_rejects_six_fields():
+    try:
+        cron.validate_cron_expr("* * * * * *")
+    except ValueError as exc:
+        assert "5 fields" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError")
+
+
+def test_interval_schedule_helpers():
+    assert cron.interval_to_cron("5", "minutes") == "*/5 * * * *"
+    assert cron.interval_to_cron("2", "hours") == "0 */2 * * *"
+    assert cron.cron_to_interval("*/5 * * * *") == {"every": "5", "unit": "minutes"}
+    assert cron.describe_cron("0 */2 * * *") == "Every 2 hours"
+
+
+def test_beijing_time_filter_converts_utc_to_beijing():
+    assert web.beijing_time("2026-06-27T14:00:13Z") == "2026-06-27 22:00:13 Beijing"
+
+
+def test_seconds_duration_filter_formats_ms_as_seconds():
+    assert web.seconds_duration(18352) == "19"
+    assert web.seconds_duration(18000) == "18"
+    assert web.seconds_duration(None) == "0"
+
+
+def test_recent_runs_page_size_is_small_for_ui():
+    assert web.RUNS_PER_PAGE == 10
+
+
+def test_hour_options_are_hourly_12_hour_labels():
+    options = web.hour_options()
+
+    assert len(options) == 24
+    assert options[0] == {"value": "00:00", "label": "12:00 AM"}
+    assert options[1] == {"value": "01:00", "label": "1:00 AM"}
+    assert options[12] == {"value": "12:00", "label": "12:00 PM"}
+    assert options[23] == {"value": "23:00", "label": "11:00 PM"}
+
+
+def test_work_window_supports_daytime_and_overnight_windows():
+    daytime = datetime(2026, 6, 28, 10, 0, tzinfo=work_window.BEIJING_TZ)
+    evening = datetime(2026, 6, 28, 20, 0, tzinfo=work_window.BEIJING_TZ)
+    early_morning = datetime(2026, 6, 28, 2, 0, tzinfo=work_window.BEIJING_TZ)
+
+    assert work_window.is_within_window("09:00", "18:00", daytime)
+    assert not work_window.is_within_window("09:00", "18:00", evening)
+    assert work_window.is_within_window("18:00", "09:00", evening)
+    assert work_window.is_within_window("18:00", "09:00", early_morning)
+    assert not work_window.is_within_window("18:00", "09:00", daytime)
+
+
+def test_work_window_describes_overnight_windows():
+    assert work_window.describe("09:00", "18:00") == "09:00 - 18:00 Beijing"
+    assert work_window.describe("18:00", "09:00") == "18:00 - 09:00 Beijing (overnight)"
+
+
+def test_work_window_requires_both_times():
+    try:
+        work_window.validate("09:00", None)
+    except ValueError as exc:
+        assert "both start and end" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError")
+
+
+def test_index_renders_for_authenticated_user(tmp_path, monkeypatch):
+    monkeypatch.setattr(web.config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(web.config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(web.config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(web.config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    db.init_db()
+    request = Request({"type": "http", "method": "GET", "path": "/", "headers": []})
+    response = web.index(request)
+
+    assert response.status_code == 200
+
+
+def test_startup_syncs_existing_jobs_to_cron_file(tmp_path, monkeypatch):
+    cron_file = tmp_path / "pi-agent-jobs"
+    monkeypatch.setattr(web.config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(web.config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(web.config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(web.config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+    monkeypatch.setattr(web.config, "CRON_FILE", cron_file)
+
+    db.init_db()
+    db.create_job(
+        {
+            "name": "pi-agent",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+        }
+    )
+
+    web.startup()
+
+    assert cron_file.exists()
+    assert "*/5 * * * * root" in cron_file.read_text()
+    assert "--job-id pi-agent" in cron_file.read_text()
+
+
+def test_disabled_runner_does_not_create_run_and_self_heals_cron(tmp_path, monkeypatch):
+    cron_file = tmp_path / "pi-agent-jobs"
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+    monkeypatch.setattr(config, "CRON_FILE", cron_file)
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "pi-agent",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 0,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+        }
+    )
+    cron_file.write_text(
+        "# stale cron file\n*/5 * * * * root /root/pi-scheduler/bin/pi-job-runner --job-id pi-agent\n",
+        encoding="utf-8",
+    )
+
+    exit_code = runner.run_job(job_id)
+
+    assert exit_code == 0
+    assert db.list_recent_runs(job_id) == []
+    assert "--job-id pi-agent" not in cron_file.read_text(encoding="utf-8")
+
+
+def test_runner_skips_without_run_record_outside_work_window(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+    monkeypatch.setattr(config, "CRON_FILE", tmp_path / "pi-agent-jobs")
+    monkeypatch.setattr(runner.work_window, "is_within_window", lambda start, end: False)
+    monkeypatch.setattr(
+        runner.subprocess,
+        "run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("pi should not run")),
+    )
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "pi-agent",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "work_start": "09:00",
+            "work_end": "18:00",
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+        }
+    )
+
+    exit_code = runner.run_job(job_id)
+
+    assert exit_code == 0
+    assert db.list_recent_runs(job_id) == []
+
+
+def test_manual_runner_bypasses_disabled_state_and_work_window(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+    monkeypatch.setattr(config, "CRON_FILE", tmp_path / "pi-agent-jobs")
+    monkeypatch.setattr(
+        runner.work_window,
+        "is_within_window",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("manual run should bypass window")),
+    )
+
+    class Result:
+        stdout = '{"type":"agent_start"}\n'
+        stderr = ""
+        returncode = 0
+
+    monkeypatch.setattr(runner.subprocess, "run", lambda *args, **kwargs: Result())
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "pi-agent",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 0,
+            "work_start": "09:00",
+            "work_end": "18:00",
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+        }
+    )
+
+    exit_code = runner.run_job(job_id, source="manual")
+    runs = db.list_recent_runs(job_id)
+
+    assert exit_code == 0
+    assert len(runs) == 1
+    assert runs[0]["source"] == "manual"
+    assert runs[0]["status"] == "success"
+
+
+def test_summary_mode_runs_print_and_writes_summary_without_jsonl(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+    monkeypatch.setattr(config, "CRON_FILE", tmp_path / "pi-agent-jobs")
+
+    captured = {}
+
+    class Result:
+        stdout = "final summary\n"
+        stderr = ""
+        returncode = 0
+
+    def fake_run(argv, **kwargs):
+        captured["argv"] = argv
+        return Result()
+
+    monkeypatch.setattr(runner.subprocess, "run", fake_run)
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "pi-agent",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+            "output_mode": "summary",
+            "session_mode": "no_session",
+        }
+    )
+
+    exit_code = runner.run_job(job_id)
+    run = db.get_run(db.list_recent_runs(job_id)[0]["id"])
+
+    assert exit_code == 0
+    assert captured["argv"] == [
+        "pi",
+        "--no-session",
+        "--name",
+        "pi-scheduler: pi-agent",
+        "-p",
+        "check logs",
+    ]
+    assert Path(run["stdout_path"]).read_text(encoding="utf-8") == "final summary\n"
+    assert run["jsonl_path"] is None
+
+
+def test_events_mode_runs_json_and_writes_transcript_and_jsonl(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+    monkeypatch.setattr(config, "CRON_FILE", tmp_path / "pi-agent-jobs")
+
+    events = "\n".join(
+        [
+            '{"type":"agent_start"}',
+            '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"final summary"}]}}',
+        ]
+    )
+    captured = {}
+
+    class Result:
+        stdout = events
+        stderr = ""
+        returncode = 0
+
+    def fake_run(argv, **kwargs):
+        captured["argv"] = argv
+        return Result()
+
+    monkeypatch.setattr(runner.subprocess, "run", fake_run)
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "pi-agent",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+            "output_mode": "events",
+            "session_mode": "save",
+        }
+    )
+
+    exit_code = runner.run_job(job_id)
+    run = db.get_run(db.list_recent_runs(job_id)[0]["id"])
+
+    assert exit_code == 0
+    assert captured["argv"] == [
+        "pi",
+        "--name",
+        "pi-scheduler: pi-agent",
+        "--mode",
+        "json",
+        "check logs",
+    ]
+    assert "final summary" in Path(run["stdout_path"]).read_text(encoding="utf-8")
+    assert Path(run["jsonl_path"]).read_text(encoding="utf-8") == events
+
+
+def test_recent_runs_ignore_disabled_status(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "pi-agent",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 0,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+        }
+    )
+    db.insert_run(
+        {
+            "id": "disabled-run",
+            "job_id": job_id,
+            "started_at": "2026-06-27T15:20:01Z",
+            "finished_at": "2026-06-27T15:20:01Z",
+            "status": "disabled",
+            "duration_ms": 0,
+            "command": "pi --mode json run",
+        }
+    )
+    db.insert_run(
+        {
+            "id": "success-run",
+            "job_id": job_id,
+            "started_at": "2026-06-27T14:55:01Z",
+            "finished_at": "2026-06-27T14:55:19Z",
+            "status": "success",
+            "duration_ms": 18000,
+            "command": "pi --mode json run",
+        }
+    )
+
+    jobs = db.list_jobs()
+    runs = db.list_recent_runs(job_id)
+
+    assert jobs[0]["last_status"] == "success"
+    assert [run["id"] for run in runs] == ["success-run"]
+
+
+def test_recent_runs_support_limit_and_offset(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "pi-agent",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+        }
+    )
+    for index in range(4):
+        db.insert_run(
+            {
+                "id": f"run-{index}",
+                "job_id": job_id,
+                "started_at": f"2026-06-27T14:0{index}:01Z",
+                "finished_at": f"2026-06-27T14:0{index}:13Z",
+                "status": "success",
+                "duration_ms": 12000,
+                "command": "pi --mode json run",
+            }
+        )
+
+    first_page = db.list_recent_runs(job_id, limit=2, offset=0)
+    second_page = db.list_recent_runs(job_id, limit=2, offset=2)
+
+    assert [run["id"] for run in first_page] == ["run-3", "run-2"]
+    assert [run["id"] for run in second_page] == ["run-1", "run-0"]
+    assert "command" not in first_page[0]
+
+
+def test_recent_runs_filter_by_source(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "pi-agent",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+        }
+    )
+    for index, (run_id, source) in enumerate([("auto-run", "auto"), ("manual-run", "manual")]):
+        db.insert_run(
+            {
+                "id": run_id,
+                "job_id": job_id,
+                "source": source,
+                "started_at": f"2026-06-27T14:5{index}:01Z",
+                "finished_at": f"2026-06-27T14:5{index}:19Z",
+                "status": "success",
+                "duration_ms": 18000,
+                "command": "pi --mode json run",
+            }
+        )
+
+    auto_runs = db.list_recent_runs(job_id, source="auto")
+    manual_runs = db.list_recent_runs(job_id, source="manual")
+
+    assert [run["id"] for run in auto_runs] == ["auto-run"]
+    assert [run["id"] for run in manual_runs] == ["manual-run"]
+
+
+def test_job_runs_status_reports_running_state(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "pi-agent",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+        }
+    )
+    db.insert_run(
+        {
+            "id": "running-run",
+            "job_id": job_id,
+            "source": "manual",
+            "started_at": "2026-06-27T14:55:01Z",
+            "status": "running",
+            "command": "pi --mode json run",
+        }
+    )
+
+    status = web.job_runs_status(job_id)
+
+    assert status["has_running_run"] is True
+    assert status["runs"][0] == {
+        "id": "running-run",
+        "started_at": "2026-06-27 22:55:01 Beijing",
+        "source": "manual",
+        "status": "running",
+        "status_class": "muted",
+        "duration": "0",
+        "exit_code": None,
+        "url": "/runs/running-run",
+    }
+
+
+def test_job_runs_status_supports_filtered_pagination(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "pi-agent",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+        }
+    )
+    db.insert_run(
+        {
+            "id": "auto-newer-run",
+            "job_id": job_id,
+            "source": "auto",
+            "started_at": "2026-06-27T15:30:01Z",
+            "finished_at": "2026-06-27T15:30:19Z",
+            "status": "success",
+            "duration_ms": 18000,
+            "command": "pi --mode json run",
+        }
+    )
+    for index in range(12):
+        db.insert_run(
+            {
+                "id": f"manual-run-{index}",
+                "job_id": job_id,
+                "source": "manual",
+                "started_at": f"2026-06-27T14:{index:02d}:01Z",
+                "finished_at": f"2026-06-27T14:{index:02d}:19Z",
+                "status": "success",
+                "duration_ms": 18000,
+                "command": "pi --mode json run",
+            }
+        )
+
+    first_page = web.job_runs_status(job_id, page=1, source="manual")
+    second_page = web.job_runs_status(job_id, page=2, source="manual")
+
+    assert first_page["page"] == 1
+    assert first_page["has_next_page"] is True
+    assert len(first_page["runs"]) == web.RUNS_PER_PAGE
+    assert first_page["runs"][0]["id"] == "manual-run-11"
+    assert second_page["page"] == 2
+    assert second_page["has_next_page"] is False
+    assert [run["id"] for run in second_page["runs"]] == ["manual-run-1", "manual-run-0"]
+
+
+def test_manual_run_queues_background_task(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "pi-agent",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+        }
+    )
+
+    class Tasks:
+        def __init__(self):
+            self.calls = []
+
+        def add_task(self, func, *args, **kwargs):
+            self.calls.append((func, args, kwargs))
+
+    tasks = Tasks()
+    response = web.manual_run(job_id, tasks)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/jobs/{job_id}?queued=1"
+    assert tasks.calls == [(runner.run_job, (job_id,), {"source": "manual"})]
+
+
+def test_read_log_limits_large_files(tmp_path):
+    log_path = tmp_path / "large.log"
+    log_path.write_text(("a" * 1024) + "tail", encoding="utf-8")
+
+    content = web.read_log(str(log_path), max_bytes=1024)
+
+    assert content.startswith("[Showing last 1 KiB of 2 KiB log]")
+    assert content.endswith("tail")
+    assert len(content) < 1100
+
+
+def test_run_detail_marks_whether_jsonl_is_available(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    stdout_path = tmp_path / "stdout.log"
+    jsonl_path = tmp_path / "events.jsonl"
+    stdout_path.write_text("summary", encoding="utf-8")
+    jsonl_path.write_text('{"type":"agent_start"}', encoding="utf-8")
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "pi-agent",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+        }
+    )
+    db.insert_run(
+        {
+            "id": "summary-run",
+            "job_id": job_id,
+            "started_at": "2026-06-27T14:55:01Z",
+            "finished_at": "2026-06-27T14:55:19Z",
+            "status": "success",
+            "duration_ms": 18000,
+            "command": "pi -p run",
+            "stdout_path": str(stdout_path),
+        }
+    )
+    db.insert_run(
+        {
+            "id": "events-run",
+            "job_id": job_id,
+            "started_at": "2026-06-27T14:56:01Z",
+            "finished_at": "2026-06-27T14:56:19Z",
+            "status": "success",
+            "duration_ms": 18000,
+            "command": "pi --mode json run",
+            "stdout_path": str(stdout_path),
+            "jsonl_path": str(jsonl_path),
+        }
+    )
+
+    request = Request({"type": "http", "method": "GET", "path": "/runs/summary-run", "headers": []})
+    summary_response = web.run_detail(request, "summary-run")
+    events_response = web.run_detail(request, "events-run")
+
+    assert summary_response.context["has_jsonl"] is False
+    assert events_response.context["has_jsonl"] is True
+
+
+def test_cleanup_old_logs_removes_old_run_files_and_records(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+    monkeypatch.setattr(
+        retention,
+        "cutoff_for_days",
+        lambda days: datetime(2026, 6, 1, 0, 0, 0, tzinfo=timezone.utc),
+    )
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "pi-agent",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+        }
+    )
+    runs_dir = config.LOG_DIR / "jobs" / job_id / "runs"
+    old_stdout = runs_dir / "old.stdout.log"
+    old_stderr = runs_dir / "old.stderr.log"
+    old_jsonl = runs_dir / "old.pi-events.jsonl"
+    fresh_stdout = runs_dir / "fresh.stdout.log"
+    old_summary = config.LOG_DIR / "jobs" / job_id / "2026-05-30.jsonl"
+    fresh_summary = config.LOG_DIR / "jobs" / job_id / "2026-06-01.jsonl"
+    for path in [old_stdout, old_stderr, old_jsonl, fresh_stdout, old_summary, fresh_summary]:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("log", encoding="utf-8")
+
+    db.insert_run(
+        {
+            "id": "old-run",
+            "job_id": job_id,
+            "started_at": "2026-05-31T23:59:59Z",
+            "finished_at": "2026-05-31T23:59:59Z",
+            "status": "success",
+            "duration_ms": 12000,
+            "command": "pi --mode json run",
+            "stdout_path": str(old_stdout),
+            "stderr_path": str(old_stderr),
+            "jsonl_path": str(old_jsonl),
+        }
+    )
+    db.insert_run(
+        {
+            "id": "fresh-run",
+            "job_id": job_id,
+            "started_at": "2026-06-01T00:00:00Z",
+            "finished_at": "2026-06-01T00:00:12Z",
+            "status": "success",
+            "duration_ms": 12000,
+            "command": "pi --mode json run",
+            "stdout_path": str(fresh_stdout),
+        }
+    )
+
+    deleted = retention.cleanup_old_logs(days=30)
+
+    assert deleted == 1
+    assert db.get_run("old-run") is None
+    assert db.get_run("fresh-run") is not None
+    assert not old_stdout.exists()
+    assert not old_stderr.exists()
+    assert not old_jsonl.exists()
+    assert fresh_stdout.exists()
+    assert not old_summary.exists()
+    assert fresh_summary.exists()
+
+
+def test_cleanup_all_runs_removes_records_files_and_summaries(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "pi-agent",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+        }
+    )
+    runs_dir = config.LOG_DIR / "jobs" / job_id / "runs"
+    stdout_path = runs_dir / "done.stdout.log"
+    stderr_path = runs_dir / "done.stderr.log"
+    running_stdout_path = runs_dir / "running.stdout.log"
+    summary_path = config.LOG_DIR / "jobs" / job_id / "2026-06-29.jsonl"
+    for path in [stdout_path, stderr_path, running_stdout_path, summary_path]:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("log", encoding="utf-8")
+
+    db.insert_run(
+        {
+            "id": "done-run",
+            "job_id": job_id,
+            "started_at": "2026-06-29T03:19:01Z",
+            "finished_at": "2026-06-29T03:19:13Z",
+            "status": "success",
+            "duration_ms": 11839,
+            "command": "pi -p run",
+            "stdout_path": str(stdout_path),
+            "stderr_path": str(stderr_path),
+        }
+    )
+    db.insert_run(
+        {
+            "id": "running-run",
+            "job_id": job_id,
+            "started_at": "2026-06-29T03:20:01Z",
+            "status": "running",
+            "command": "pi -p run",
+            "stdout_path": str(running_stdout_path),
+        }
+    )
+
+    result = retention.cleanup_all_runs()
+
+    assert result.runs_deleted == 1
+    assert db.get_run("done-run") is None
+    assert db.get_run("running-run") is not None
+    assert not stdout_path.exists()
+    assert not stderr_path.exists()
+    assert running_stdout_path.exists()
+    assert not summary_path.exists()
+
+
+def test_cleanup_logs_rejects_wrong_confirmation(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "pi-agent",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+        }
+    )
+    stdout_path = config.LOG_DIR / "jobs" / job_id / "runs" / "run.stdout.log"
+    stdout_path.parent.mkdir(parents=True, exist_ok=True)
+    stdout_path.write_text("log", encoding="utf-8")
+    db.insert_run(
+        {
+            "id": "run",
+            "job_id": job_id,
+            "started_at": "2026-06-29T03:19:01Z",
+            "finished_at": "2026-06-29T03:19:13Z",
+            "status": "success",
+            "duration_ms": 11839,
+            "command": "pi -p run",
+            "stdout_path": str(stdout_path),
+        }
+    )
+
+    request = Request({"type": "http", "method": "POST", "path": "/maintenance/logs", "headers": []})
+    response = web.cleanup_logs(request, mode="all", confirmation="delete all logs", days=30)
+
+    assert response.context["errors"]
+    assert response.context["result"] is None
+    assert db.get_run("run") is not None
+    assert stdout_path.exists()

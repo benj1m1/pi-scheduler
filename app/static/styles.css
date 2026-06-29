@@ -1,0 +1,112 @@
+:root {
+  color-scheme: light;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #f4f0e8;
+  color: #1b1b1f;
+}
+
+body { margin: 0; }
+header {
+  align-items: center;
+  background: #171717;
+  color: white;
+  display: flex;
+  justify-content: space-between;
+  padding: 1rem clamp(1rem, 4vw, 3rem);
+}
+.brand { color: white; font-weight: 800; text-decoration: none; }
+nav { display: flex; gap: 1rem; }
+nav a { color: #ffe0a6; text-decoration: none; }
+main { margin: 0 auto; max-width: 1120px; padding: 2rem clamp(1rem, 4vw, 3rem); }
+.hero { margin-bottom: 1.5rem; }
+h1, h2 { line-height: 1.1; margin: 0 0 0.8rem; }
+.cards { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); }
+.card, .panel, .empty {
+  background: #fffaf1;
+  border: 1px solid #e3d6c2;
+  border-radius: 18px;
+  box-shadow: 0 12px 30px rgb(42 31 20 / 8%);
+  padding: 1.25rem;
+}
+.card-head { align-items: center; display: flex; gap: 1rem; justify-content: space-between; }
+dl { display: grid; gap: 0.35rem 0.75rem; grid-template-columns: 6rem 1fr; }
+.wide { grid-template-columns: 8rem 1fr; }
+dt { color: #665f56; font-weight: 700; }
+dd { margin: 0; overflow-wrap: anywhere; }
+.prompt-preview {
+  display: -webkit-box;
+  line-clamp: 4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  max-height: 5.8em;
+  overflow: hidden;
+  white-space: normal;
+}
+code, pre { background: #25211d; border-radius: 8px; color: #ffe8c2; }
+code { padding: 0.12rem 0.35rem; }
+pre { overflow: auto; padding: 1rem; white-space: pre-wrap; }
+.log-head { align-items: center; display: flex; gap: 1rem; justify-content: space-between; }
+.log-head h2 { margin-bottom: 0; }
+.log-box { max-height: min(58vh, 34rem); overscroll-behavior: contain; }
+.copy-log { flex: 0 0 auto; }
+.actions { align-items: center; display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 1rem; }
+.tabs { align-items: center; display: flex; flex-wrap: wrap; gap: 0.6rem; margin: 0.5rem 0 1rem; }
+.pagination { align-items: center; display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 1rem; }
+.page-control { align-items: center; display: flex; flex-direction: row; gap: 0.45rem; }
+.page-input { border-radius: 999px; padding: 0.5rem 0.65rem; text-align: center; width: 4.5rem; }
+button, .button {
+  background: #fff;
+  border: 1px solid #c9baa4;
+  border-radius: 999px;
+  color: #1b1b1f;
+  cursor: pointer;
+  display: inline-block;
+  font: inherit;
+  padding: 0.5rem 0.9rem;
+  text-decoration: none;
+}
+button:disabled {
+  cursor: not-allowed;
+}
+.primary { background: #d05d28; border-color: #d05d28; color: white; }
+.danger { background: #811d1d; border-color: #811d1d; color: white; }
+button:disabled, button.primary:disabled {
+  background: #d8d0c4;
+  border-color: #c2b8aa;
+  color: #665f56;
+}
+.badge { border-radius: 999px; display: inline-block; font-size: 0.82rem; font-weight: 800; padding: 0.22rem 0.55rem; }
+.ok { background: #d7f4cf; color: #1f5c1b; }
+.bad { background: #ffd8d2; color: #8c1d18; }
+.bad-text { color: #8c1d18; }
+.muted-text { color: #665f56; }
+.muted { background: #e8e1d6; color: #5b554d; }
+.stack { display: grid; gap: 1rem; }
+label { display: grid; font-weight: 700; gap: 0.35rem; }
+.check { align-items: center; display: flex; }
+.forced-check { color: #665f56; cursor: not-allowed; }
+.forced-check input { accent-color: #9b948a; cursor: not-allowed; }
+input, select, textarea {
+  border: 1px solid #c9baa4;
+  border-radius: 10px;
+  font: inherit;
+  padding: 0.65rem 0.7rem;
+}
+textarea { min-height: 8rem; resize: vertical; }
+fieldset { border: 1px solid #e3d6c2; border-radius: 14px; padding: 1rem; }
+legend { color: #665f56; font-weight: 800; padding: 0 0.35rem; }
+.inline-fields { display: grid; gap: 1rem; grid-template-columns: minmax(8rem, 12rem) minmax(10rem, 1fr); }
+.hint { color: #665f56; margin: 0.7rem 0 0; }
+.window-status { margin: 0.7rem 0 0; }
+.errors { background: #ffe2dc; border: 1px solid #e39b8b; border-radius: 12px; margin-bottom: 1rem; padding: 0.75rem; }
+table { border-collapse: collapse; width: 100%; }
+th, td { border-bottom: 1px solid #e3d6c2; padding: 0.65rem; text-align: left; }
+
+@media (max-width: 700px) {
+  header, .card-head { align-items: flex-start; flex-direction: column; }
+  .log-head { align-items: flex-start; flex-direction: column; gap: 0.6rem; }
+  .log-box { max-height: 60vh; }
+  .inline-fields { grid-template-columns: 1fr; }
+  dl, .wide { grid-template-columns: 1fr; }
+  dt { margin-top: 0.5rem; }
+}
