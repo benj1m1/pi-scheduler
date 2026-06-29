@@ -31,10 +31,6 @@ RUN_SOURCE_FILTERS = {
 OUTPUT_MODES = {"summary", "events"}
 SESSION_MODES = {"save", "no_session"}
 TOOL_MODES = {"full", "read_only", "no_tools"}
-OLD_LOGS_CONFIRMATION = "DELETE OLD LOGS"
-ALL_LOGS_CONFIRMATION = "DELETE ALL LOGS"
-
-
 def hour_options() -> list[dict[str, str]]:
     options = []
     for hour in range(24):
@@ -519,8 +515,6 @@ def maintenance_logs(request: Request):
         "maintenance_logs.html",
         {
             "request": request,
-            "old_confirmation": OLD_LOGS_CONFIRMATION,
-            "all_confirmation": ALL_LOGS_CONFIRMATION,
             "errors": [],
             "result": None,
         },
@@ -531,7 +525,6 @@ def maintenance_logs(request: Request):
 def cleanup_logs(
     request: Request,
     mode: Annotated[str, Form()],
-    confirmation: Annotated[str, Form()],
     days: Annotated[int, Form()] = 30,
 ):
     errors: list[str] = []
@@ -540,15 +533,10 @@ def cleanup_logs(
     if mode == "older_than":
         if days < 1:
             errors.append("Days must be at least 1")
-        if confirmation != OLD_LOGS_CONFIRMATION:
-            errors.append(f'Type "{OLD_LOGS_CONFIRMATION}" to confirm deleting old run history')
         if not errors:
             result = retention.cleanup_runs_before(retention.cutoff_for_days(days))
     elif mode == "all":
-        if confirmation != ALL_LOGS_CONFIRMATION:
-            errors.append(f'Type "{ALL_LOGS_CONFIRMATION}" to confirm deleting all run history')
-        if not errors:
-            result = retention.cleanup_all_runs()
+        result = retention.cleanup_all_runs()
     else:
         errors.append("Cleanup mode is invalid")
 
@@ -557,8 +545,6 @@ def cleanup_logs(
         "maintenance_logs.html",
         {
             "request": request,
-            "old_confirmation": OLD_LOGS_CONFIRMATION,
-            "all_confirmation": ALL_LOGS_CONFIRMATION,
             "errors": errors,
             "result": result,
             "mode": mode,

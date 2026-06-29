@@ -1195,7 +1195,7 @@ def test_cleanup_all_runs_removes_records_files_and_summaries(tmp_path, monkeypa
     assert not summary_path.exists()
 
 
-def test_cleanup_logs_rejects_wrong_confirmation(tmp_path, monkeypatch):
+def test_cleanup_logs_does_not_require_typed_confirmation(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
     monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
     monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
@@ -1230,9 +1230,9 @@ def test_cleanup_logs_rejects_wrong_confirmation(tmp_path, monkeypatch):
     )
 
     request = Request({"type": "http", "method": "POST", "path": "/maintenance/logs", "headers": []})
-    response = web.cleanup_logs(request, mode="all", confirmation="delete all logs", days=30)
+    response = web.cleanup_logs(request, mode="all", days=30)
 
-    assert response.context["errors"]
-    assert response.context["result"] is None
-    assert db.get_run("run") is not None
-    assert stdout_path.exists()
+    assert response.context["errors"] == []
+    assert response.context["result"].runs_deleted == 1
+    assert db.get_run("run") is None
+    assert not stdout_path.exists()

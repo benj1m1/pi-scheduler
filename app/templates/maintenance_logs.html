@@ -28,15 +28,11 @@
   <section class="panel">
     <h2>Delete Old Run History</h2>
     <p class="hint">Deletes runs older than the selected number of days. Job definitions, cron configuration, Pi sessions, and model configuration are not deleted.</p>
-    <form class="stack" method="post" action="/maintenance/logs">
+    <form class="stack" method="post" action="/maintenance/logs" data-confirm="Delete old run history? This removes matching run records and log files.">
       <input type="hidden" name="mode" value="older_than">
       <label>
         Delete runs older than days
         <input name="days" type="number" min="1" value="{{ days if mode == 'older_than' else 30 }}" required>
-      </label>
-      <label>
-        Type <code>{{ old_confirmation }}</code> to confirm
-        <input name="confirmation" autocomplete="off" required>
       </label>
       <div class="actions">
         <button class="danger" type="submit">Delete Old Run History</button>
@@ -47,17 +43,22 @@
   <section class="panel danger-zone">
     <h2>Delete All Run History</h2>
     <p class="hint">Deletes all completed run records and their log files. Currently running jobs are left alone.</p>
-    <form class="stack" method="post" action="/maintenance/logs">
+    <form class="stack" method="post" action="/maintenance/logs" data-confirm="Delete all run history? This removes completed run records and log files. Running jobs are left alone.">
       <input type="hidden" name="mode" value="all">
       <input type="hidden" name="days" value="30">
-      <label>
-        Type <code>{{ all_confirmation }}</code> to confirm
-        <input name="confirmation" autocomplete="off" required>
-      </label>
       <div class="actions">
         <button class="danger" type="submit">Delete All Run History</button>
       </div>
     </form>
   </section>
 </div>
+<script>
+  document.querySelectorAll("form[data-confirm]").forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      if (!window.confirm(form.dataset.confirm || "Delete run history?")) {
+        event.preventDefault();
+      }
+    });
+  });
+</script>
 {% endblock %}
