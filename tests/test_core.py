@@ -427,6 +427,70 @@ def test_index_renders_for_authenticated_user(tmp_path, monkeypatch):
     assert response.status_code == 200
 
 
+def test_index_shows_running_job_state(tmp_path, monkeypatch):
+    monkeypatch.setattr(web.config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(web.config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(web.config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(web.config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "pi-agent",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+        }
+    )
+    db.insert_run(
+        {
+            "id": "running-run",
+            "job_id": job_id,
+            "source": "manual",
+            "started_at": "2026-06-27T14:55:01Z",
+            "status": "running",
+            "command": "pi --mode json run",
+        }
+    )
+
+    request = Request({"type": "http", "method": "GET", "path": "/", "headers": []})
+    response = web.index(request)
+    html = web.templates.env.get_template("index.html").render(response.context)
+
+    assert response.context["jobs"][0]["has_running_run"] == 1
+    assert '<button class="primary" disabled>Running</button>' in html
+
+
+def test_index_shows_queued_job_as_running(tmp_path, monkeypatch):
+    monkeypatch.setattr(web.config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(web.config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(web.config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(web.config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "pi-agent",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+        }
+    )
+
+    request = Request({"type": "http", "method": "GET", "path": "/", "headers": []})
+    response = web.index(request, queued=job_id)
+    html = web.templates.env.get_template("index.html").render(response.context)
+
+    assert response.context["jobs"][0]["has_running_run"] == 1
+    assert '<button class="primary" disabled>Running</button>' in html
+
+
 def test_startup_syncs_existing_jobs_to_cron_file(tmp_path, monkeypatch):
     cron_file = tmp_path / "pi-agent-jobs"
     monkeypatch.setattr(web.config, "DATA_DIR", tmp_path / "data")
@@ -929,6 +993,40 @@ def test_manual_run_queues_background_task(tmp_path, monkeypatch):
 
     assert response.status_code == 303
     assert response.headers["location"] == f"/jobs/{job_id}?queued=1"
+    assert tasks.calls == [(runner.run_job, (job_id,), {"source": "manual"})]
+
+
+def test_manual_run_from_index_returns_to_index(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "pi-agent",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+        }
+    )
+
+    class Tasks:
+        def __init__(self):
+            self.calls = []
+
+        def add_task(self, func, *args, **kwargs):
+            self.calls.append((func, args, kwargs))
+
+    tasks = Tasks()
+    response = web.manual_run(job_id, tasks, return_to="index")
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/?queued={job_id}"
     assert tasks.calls == [(runner.run_job, (job_id,), {"source": "manual"})]
 
 

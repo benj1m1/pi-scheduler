@@ -241,10 +241,12 @@ def job_form_context(request: Request, job: dict, errors: list[str], action: str
 
 
 @app.get("/", dependencies=[Depends(require_auth)])
-def index(request: Request):
+def index(request: Request, queued: str = ""):
     jobs = db.list_jobs()
     for job in jobs:
         job["next_run"] = cron.next_run(job["cron_expr"]) if job.get("enabled") else None
+        if queued and job["id"] == queued:
+            job["has_running_run"] = 1
     return templates.TemplateResponse(request, "index.html", {"request": request, "jobs": jobs})
 
 
@@ -461,10 +463,16 @@ def delete_job(job_id: str):
 
 
 @app.post("/jobs/{job_id}/run", dependencies=[Depends(require_auth)])
-def manual_run(job_id: str, background_tasks: BackgroundTasks):
+def manual_run(
+    job_id: str,
+    background_tasks: BackgroundTasks,
+    return_to: Annotated[str, Form()] = "",
+):
     if db.get_job(job_id) is None:
         raise HTTPException(status_code=404, detail="Job not found")
     background_tasks.add_task(runner.run_job, job_id, source="manual")
+    if return_to == "index":
+        return redirect_to(f"/?queued={job_id}")
     return redirect_to(f"/jobs/{job_id}?queued=1")
 
 

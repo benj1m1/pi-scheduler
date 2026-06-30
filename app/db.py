@@ -112,7 +112,11 @@ def list_jobs() -> list[dict[str, Any]]:
               j.*,
               r.status as last_status,
               r.started_at as last_started_at,
-              r.finished_at as last_finished_at
+              r.finished_at as last_finished_at,
+              exists(
+                select 1 from runs running
+                where running.job_id = j.id and running.status = 'running'
+              ) as has_running_run
             from jobs j
             left join runs r on r.id = (
               select id from runs
