@@ -12,7 +12,7 @@
     <dt>Prompt</dt>
     <dd>
       <div class="collapsible-field" {% if prompt_collapsible %}data-collapsible{% endif %}>
-        <div id="prompt-preview" class="collapsible-text {{ 'is-collapsible' if prompt_collapsible else 'expanded' }}">{{ job.task_prompt }}</div>
+        <textarea id="prompt-preview" class="readonly-field collapsible-text {{ 'is-collapsible' if prompt_collapsible else 'expanded' }}" rows="{{ 5 if prompt_collapsible else 1 }}" readonly aria-label="Prompt">{{ job.task_prompt }}</textarea>
         {% if prompt_collapsible %}<button class="inline-toggle collapsible-toggle" type="button" aria-expanded="false" aria-controls="prompt-preview">Show more</button>{% endif %}
       </div>
     </dd>
@@ -80,6 +80,9 @@
 
     toggle.addEventListener("click", () => {
       const expanded = content.classList.toggle("expanded");
+      if (content.tagName === "TEXTAREA") {
+        content.style.height = expanded ? `${content.scrollHeight}px` : "";
+      }
       toggle.setAttribute("aria-expanded", String(expanded));
       toggle.textContent = expanded ? "Show less" : "Show more";
     });

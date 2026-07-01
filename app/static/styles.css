@@ -102,6 +102,24 @@ pre { overflow: auto; padding: 1rem; white-space: pre-wrap; }
   position: relative;
   white-space: pre-wrap;
 }
+.readonly-field {
+  background: #f7efe2;
+  border: 1px solid #ddceb8;
+  border-radius: 12px;
+  box-sizing: border-box;
+  color: #2d2924;
+  cursor: text;
+  display: block;
+  min-height: calc(var(--collapsible-line-height) * 1 + 1.5rem);
+  padding: 0.75rem;
+  resize: none;
+  width: 100%;
+}
+.readonly-field:focus {
+  border-color: #d05d28;
+  outline: 2px solid rgb(208 93 40 / 22%);
+  outline-offset: 0;
+}
 .collapsible-text.is-collapsible {
   max-height: calc(var(--collapsible-line-height) * 5);
   overflow: hidden;

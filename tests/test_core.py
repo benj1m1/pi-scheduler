@@ -1144,7 +1144,7 @@ def test_job_detail_shows_only_recent_runs_with_logs_link(tmp_path, monkeypatch)
     assert len(response.context["runs"]) == web.RUNS_PER_PAGE
     assert response.context["runs"][0]["id"] == "run-11"
     assert f'href="/logs?job_id={job_id}"' in html
-    assert 'id="prompt-preview" class="collapsible-text expanded"' in html
+    assert '<textarea id="prompt-preview" class="readonly-field collapsible-text expanded" rows="1" readonly' in html
     assert 'aria-controls="prompt-preview"' not in html
     assert 'id="command-preview" class="collapsible-text command-preview' in html
     assert 'id="previous-page"' not in html
@@ -1174,7 +1174,7 @@ def test_job_detail_collapses_long_prompt(tmp_path, monkeypatch):
     response = web.job_detail(request, job_id)
     html = web.templates.env.get_template("job_detail.html").render(response.context)
 
-    assert 'id="prompt-preview" class="collapsible-text is-collapsible"' in html
+    assert '<textarea id="prompt-preview" class="readonly-field collapsible-text is-collapsible" rows="5" readonly' in html
     assert 'aria-controls="prompt-preview"' in html
     assert "Show more" in html
 
