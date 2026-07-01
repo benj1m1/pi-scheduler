@@ -275,6 +275,51 @@ def list_recent_runs(
         return list_recent_runs_for_connection(conn, job_id, limit, offset, source)
 
 
+def list_runs(
+    limit: int = 50,
+    offset: int = 0,
+    job_id: str | None = None,
+    source: str | None = None,
+    status: str | None = None,
+    started_at_from: str | None = None,
+    started_at_before: str | None = None,
+) -> list[dict[str, Any]]:
+    filters = ["r.status != 'disabled'"]
+    params: list[Any] = []
+    if job_id:
+        filters.append("r.job_id = ?")
+        params.append(job_id)
+    if source:
+        filters.append("r.source = ?")
+        params.append(source)
+    if status:
+        filters.append("r.status = ?")
+        params.append(status)
+    if started_at_from:
+        filters.append("r.started_at >= ?")
+        params.append(started_at_from)
+    if started_at_before:
+        filters.append("r.started_at < ?")
+        params.append(started_at_before)
+    params.extend([limit, offset])
+    with connect() as conn:
+        rows = conn.execute(
+            f"""
+            select
+              r.id, r.job_id, r.source, r.started_at, r.finished_at, r.status,
+              r.exit_code, r.duration_ms, r.error_summary, r.stdout_path, r.stderr_path,
+              r.jsonl_path, j.name as job_name, j.deleted_at as job_deleted_at
+            from runs r
+            left join jobs j on j.id = r.job_id
+            where {' and '.join(filters)}
+            order by r.started_at desc
+            limit ? offset ?
+            """,
+            params,
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
 def list_recent_runs_for_connection(
     conn: sqlite3.Connection,
     job_id: str | None = None,

@@ -31,13 +31,14 @@
 </section>
 
 <section class="panel">
-  <h2>Recent Runs</h2>
-  <div class="tabs">
-    {% for key, label in run_source_filters.items() %}
-    <a class="button run-source-tab {{ 'primary' if source == key else '' }}" data-source="{{ key }}" href="/jobs/{{ job.id }}?source={{ key }}">{{ label }}</a>
-    {% endfor %}
+  <div class="section-head">
+    <div>
+      <h2>Recent Runs</h2>
+      <p class="hint">Latest 10 runs for quick status checks.</p>
+    </div>
+    <a class="button" href="/logs?job_id={{ job.id }}">More logs</a>
   </div>
-  <div id="recent-runs" data-job-id="{{ job.id }}" data-page="{{ page }}" data-source="{{ source }}" data-initial-running="{{ 'true' if has_running_run else 'false' }}">
+  <div id="recent-runs" data-job-id="{{ job.id }}" data-initial-running="{{ 'true' if has_running_run else 'false' }}">
   <table id="recent-runs-table" {% if not runs %}hidden{% endif %}>
     <thead><tr><th>Started</th><th>Source</th><th>Status</th><th>Duration</th><th>Exit</th><th></th></tr></thead>
     <tbody id="recent-runs-body">
@@ -53,13 +54,8 @@
       {% endfor %}
     </tbody>
   </table>
-  <p id="recent-runs-empty" {% if runs %}hidden{% endif %}>{{ 'No runs on this page.' if page > 1 else 'No runs yet.' }}</p>
+  <p id="recent-runs-empty" {% if runs %}hidden{% endif %}>No runs yet.</p>
   <p id="recent-runs-status" class="hint" aria-live="polite" hidden></p>
-  <div id="recent-runs-pagination" class="pagination">
-    <button id="previous-page" class="button" type="button" {% if page <= 1 %}disabled{% endif %}>Previous</button>
-    <label class="page-control" for="page-input">Page <input id="page-input" class="page-input" type="number" min="1" value="{{ page }}" inputmode="numeric"></label>
-    <button id="next-page" class="button" type="button" {% if not has_next_page %}disabled{% endif %}>Next</button>
-  </div>
   </div>
 </section>
 <script>
@@ -70,15 +66,8 @@
   const runsBody = document.getElementById("recent-runs-body");
   const runsEmpty = document.getElementById("recent-runs-empty");
   const runsStatus = document.getElementById("recent-runs-status");
-  const sourceTabs = Array.from(document.querySelectorAll(".run-source-tab"));
-  const previousPage = document.getElementById("previous-page");
-  const nextPage = document.getElementById("next-page");
-  const pageInput = document.getElementById("page-input");
   const jobId = recentRuns.dataset.jobId;
   const state = {
-    page: Number(recentRuns.dataset.page),
-    source: recentRuns.dataset.source,
-    hasNextPage: !nextPage.disabled,
     isRunning: recentRuns.dataset.initialRunning === "true",
     isBusy: false,
   };
@@ -107,11 +96,6 @@
 
   function setBusy(isBusy, message = "") {
     state.isBusy = isBusy;
-    renderPagination(state.hasNextPage);
-    pageInput.disabled = isBusy;
-    for (const tab of sourceTabs) {
-      tab.setAttribute("aria-disabled", isBusy ? "true" : "false");
-    }
     setStatus(message);
   }
 
@@ -148,29 +132,7 @@
     }
     runsTable.hidden = runs.length === 0;
     runsEmpty.hidden = runs.length > 0;
-    runsEmpty.textContent = state.page > 1 ? "No runs on this page." : "No runs yet.";
-  }
-
-  function jobUrl() {
-    const params = new URLSearchParams({ source: state.source, page: String(state.page) });
-    return `/jobs/${encodeURIComponent(jobId)}?${params.toString()}`;
-  }
-
-  function renderPagination(hasNextPage) {
-    state.hasNextPage = hasNextPage;
-    previousPage.disabled = state.isBusy || state.page <= 1;
-    nextPage.disabled = state.isBusy || !hasNextPage;
-    if (document.activeElement !== pageInput) {
-      pageInput.value = String(state.page);
-    }
-  }
-
-  function renderSourceTabs() {
-    for (const tab of sourceTabs) {
-      tab.classList.toggle("primary", tab.dataset.source === state.source);
-      const params = new URLSearchParams({ source: tab.dataset.source, page: "1" });
-      tab.href = `/jobs/${encodeURIComponent(jobId)}?${params.toString()}`;
-    }
+    runsEmpty.textContent = "No runs yet.";
   }
 
   function clearPollTimer() {
@@ -192,7 +154,7 @@
     }, delayMs);
   }
 
-  async function refreshRuns({ updateHistory = false, replaceHistory = false, reason = "manual" } = {}) {
+  async function refreshRuns({ reason = "manual" } = {}) {
     if (document.hidden) return;
     if (reason === "poll" && activeRequest) return;
     clearPollTimer();
@@ -209,10 +171,9 @@
       setBusy(true, "Updating recent runs...");
     }
 
-    const params = new URLSearchParams({ source: state.source, page: String(state.page) });
     let statusAfterBusy = "";
     try {
-      const response = await fetch(`/jobs/${encodeURIComponent(jobId)}/runs/status?${params.toString()}`, {
+      const response = await fetch(`/jobs/${encodeURIComponent(jobId)}/runs/status`, {
         credentials: "same-origin",
         headers: { "Accept": "application/json" },
         signal: controller.signal,
@@ -225,15 +186,8 @@
 
       consecutiveFailures = 0;
       setStatus("");
-      state.page = data.page;
       setRunning(data.has_running_run || queuedRecently());
       renderRuns(data.runs);
-      renderPagination(data.has_next_page);
-      renderSourceTabs();
-      if (updateHistory) {
-        const method = replaceHistory ? "replaceState" : "pushState";
-        history[method]({ page: state.page, source: state.source }, "", jobUrl());
-      }
       scheduleNextPoll(pollIntervalMs);
     } catch (error) {
       if (error.name === "AbortError") return;
@@ -254,51 +208,10 @@
     }
   }
 
-  function goToPage(nextPage) {
-    const parsed = Number(nextPage);
-    if (!Number.isFinite(parsed) || parsed < 1) {
-      pageInput.value = String(state.page);
-      return;
-    }
-    state.page = Math.floor(parsed);
-    refreshRuns({ updateHistory: true });
-  }
-
-  function applyUrlState() {
-    const params = new URLSearchParams(window.location.search);
-    const page = Number(params.get("page") || "1");
-    const source = params.get("source") || "all";
-    state.page = Number.isFinite(page) && page >= 1 ? Math.floor(page) : 1;
-    state.source = ["all", "auto", "manual"].includes(source) ? source : "all";
-    refreshRuns({ updateHistory: true, replaceHistory: true });
-  }
-
   runNowForm.addEventListener("submit", () => {
     setRunning(true);
     scheduleNextPoll(pollIntervalMs);
   });
-  for (const tab of sourceTabs) {
-    tab.addEventListener("click", (event) => {
-      event.preventDefault();
-      if (state.isBusy) return;
-      state.source = tab.dataset.source;
-      state.page = 1;
-      refreshRuns({ updateHistory: true });
-    });
-  }
-  previousPage.addEventListener("click", () => goToPage(state.page - 1));
-  nextPage.addEventListener("click", () => goToPage(state.page + 1));
-  pageInput.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      goToPage(pageInput.value);
-      pageInput.blur();
-    }
-  });
-  pageInput.addEventListener("blur", () => {
-    pageInput.value = String(state.page);
-  });
-  window.addEventListener("popstate", applyUrlState);
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       clearPollTimer();
@@ -306,7 +219,6 @@
     }
     refreshRuns({ reason: shouldPoll() ? "poll" : "manual" });
   });
-  history.replaceState({ page: state.page, source: state.source }, "", jobUrl());
   scheduleNextPoll(pollIntervalMs);
 </script>
 {% endblock %}

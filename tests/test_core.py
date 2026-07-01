@@ -1106,6 +1106,110 @@ def test_job_runs_status_supports_filtered_pagination(tmp_path, monkeypatch):
     assert [run["id"] for run in second_page["runs"]] == ["manual-run-1", "manual-run-0"]
 
 
+def test_job_detail_shows_only_recent_runs_with_logs_link(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "pi-agent",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+        }
+    )
+    for index in range(12):
+        db.insert_run(
+            {
+                "id": f"run-{index}",
+                "job_id": job_id,
+                "started_at": f"2026-06-27T14:{index:02d}:01Z",
+                "finished_at": f"2026-06-27T14:{index:02d}:19Z",
+                "status": "success",
+                "duration_ms": 18000,
+                "command": "pi --mode json run",
+            }
+        )
+
+    request = Request({"type": "http", "method": "GET", "path": f"/jobs/{job_id}", "headers": []})
+    response = web.job_detail(request, job_id)
+    html = web.templates.env.get_template("job_detail.html").render(response.context)
+
+    assert len(response.context["runs"]) == web.RUNS_PER_PAGE
+    assert response.context["runs"][0]["id"] == "run-11"
+    assert f'href="/logs?job_id={job_id}"' in html
+    assert 'id="previous-page"' not in html
+    assert 'id="next-page"' not in html
+
+
+def test_logs_page_lists_runs_with_filters_and_cleanup_controls(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "pi-agent",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+        }
+    )
+    db.insert_run(
+        {
+            "id": "success-run",
+            "job_id": job_id,
+            "source": "manual",
+            "started_at": "2026-06-27T14:30:01Z",
+            "finished_at": "2026-06-27T14:30:19Z",
+            "status": "success",
+            "duration_ms": 18000,
+            "command": "pi --mode json run",
+            "stdout_path": str(config.LOG_DIR / "success.stdout.log"),
+        }
+    )
+    db.insert_run(
+        {
+            "id": "failed-run",
+            "job_id": job_id,
+            "source": "auto",
+            "started_at": "2026-06-27T15:30:01Z",
+            "finished_at": "2026-06-27T15:30:19Z",
+            "status": "failed",
+            "duration_ms": 18000,
+            "command": "pi --mode json run",
+        }
+    )
+
+    request = Request({"type": "http", "method": "GET", "path": "/logs", "headers": []})
+    response = web.logs_page(request, job_id=job_id, source="manual", run_status="success")
+    html = web.templates.env.get_template("logs.html").render(response.context)
+
+    assert [run["id"] for run in response.context["runs"]] == ["success-run"]
+    assert response.context["filters"]["job_id"] == job_id
+    assert 'action="/logs/cleanup"' in html
+    assert "Delete All Completed Runs" in html
+    assert "failed-run" not in html
+
+
+def test_maintenance_logs_redirects_to_logs():
+    response = web.maintenance_logs()
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/logs"
+
+
 def test_manual_run_queues_background_task(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
     monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
@@ -1471,7 +1575,7 @@ def test_cleanup_logs_does_not_require_typed_confirmation(tmp_path, monkeypatch)
         }
     )
 
-    request = Request({"type": "http", "method": "POST", "path": "/maintenance/logs", "headers": []})
+    request = Request({"type": "http", "method": "POST", "path": "/logs/cleanup", "headers": []})
     response = web.cleanup_logs(request, mode="all", days=30)
 
     assert response.context["errors"] == []

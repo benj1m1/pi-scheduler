@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import secrets
 import math
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Query, Request, status
@@ -22,11 +23,19 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 BEIJING_TZ = ZoneInfo("Asia/Shanghai")
 RUNS_PER_PAGE = 10
+LOGS_PER_PAGE = 50
 LOG_PREVIEW_BYTES = 200 * 1024
 RUN_SOURCE_FILTERS = {
     "all": "All",
     "auto": "Automatic",
     "manual": "Manual",
+}
+LOG_STATUS_FILTERS = {
+    "all": "All statuses",
+    "running": "Running",
+    "success": "Success",
+    "failed": "Failed",
+    "timeout": "Timed out",
 }
 OUTPUT_MODES = {"summary", "events"}
 SESSION_MODES = {"save", "no_session"}
@@ -75,6 +84,85 @@ def format_run_summary(run: dict) -> dict:
         "duration": seconds_duration(run.get("duration_ms")),
         "exit_code": run.get("exit_code"),
         "url": f"/runs/{run['id']}",
+    }
+
+
+def logs_path(filters: dict[str, str], page: int) -> str:
+    params = {key: value for key, value in filters.items() if value and value != "all"}
+    if page > 1:
+        params["page"] = str(page)
+    query = urlencode(params)
+    return f"/logs?{query}" if query else "/logs"
+
+
+def parse_beijing_day(value: str, next_day: bool = False) -> str | None:
+    if not value:
+        return None
+    day = datetime.strptime(value, "%Y-%m-%d").replace(tzinfo=BEIJING_TZ)
+    if next_day:
+        day += timedelta(days=1)
+    return day.astimezone(ZoneInfo("UTC")).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def logs_context(
+    request: Request,
+    page: int = 1,
+    job_id: str = "",
+    source: str = "all",
+    run_status: str = "all",
+    start_date: str = "",
+    end_date: str = "",
+    errors: list[str] | None = None,
+    result: retention.CleanupResult | None = None,
+    mode: str | None = None,
+    days: int = 30,
+) -> dict:
+    filters = {
+        "job_id": job_id,
+        "source": source,
+        "status": run_status,
+        "start_date": start_date,
+        "end_date": end_date,
+    }
+    context_errors = list(errors or [])
+    started_at_from = None
+    started_at_before = None
+    try:
+        started_at_from = parse_beijing_day(start_date)
+    except ValueError:
+        context_errors.append("Start date must use YYYY-MM-DD")
+    try:
+        started_at_before = parse_beijing_day(end_date, next_day=True)
+    except ValueError:
+        context_errors.append("End date must use YYYY-MM-DD")
+    if start_date and end_date and not context_errors and start_date > end_date:
+        context_errors.append("Start date must be on or before end date")
+
+    runs_page = db.list_runs(
+        limit=LOGS_PER_PAGE + 1,
+        offset=(page - 1) * LOGS_PER_PAGE,
+        job_id=job_id or None,
+        source=None if source == "all" else source,
+        status=None if run_status == "all" else run_status,
+        started_at_from=started_at_from,
+        started_at_before=started_at_before,
+    )
+    runs = runs_page[:LOGS_PER_PAGE]
+    return {
+        "request": request,
+        "runs": runs,
+        "jobs": db.list_jobs(),
+        "page": page,
+        "has_next_page": len(runs_page) > LOGS_PER_PAGE,
+        "filters": filters,
+        "previous_url": logs_path(filters, page - 1) if page > 1 else "",
+        "next_url": logs_path(filters, page + 1) if len(runs_page) > LOGS_PER_PAGE else "",
+        "run_source_filters": RUN_SOURCE_FILTERS,
+        "log_status_filters": LOG_STATUS_FILTERS,
+        "errors": context_errors,
+        "result": result,
+        "mode": mode,
+        "days": days,
     }
 
 
@@ -327,20 +415,12 @@ def create_job(
 def job_detail(
     request: Request,
     job_id: str,
-    page: Annotated[int, Query(ge=1)] = 1,
-    source: Annotated[str, Query(pattern="^(all|auto|manual)$")] = "all",
     queued: Annotated[int, Query(ge=0, le=1)] = 0,
 ):
-    run_source = None if source == "all" else source
-    status_data = db.get_job_runs_status(
-        job_id, RUNS_PER_PAGE + 1, (page - 1) * RUNS_PER_PAGE, run_source
-    )
+    status_data = db.get_job_runs_status(job_id, RUNS_PER_PAGE, 0)
     if status_data is None:
         raise HTTPException(status_code=404, detail="Job not found")
     job = status_data["job"]
-    runs_page = status_data["runs"]
-    runs = runs_page[:RUNS_PER_PAGE]
-    has_next_page = len(runs_page) > RUNS_PER_PAGE
     command_error = None
     try:
         command = runner.build_command(job)[1]
@@ -353,13 +433,9 @@ def job_detail(
         {
             "request": request,
             "job": job,
-            "runs": runs,
+            "runs": status_data["runs"],
             "command": command,
             "command_error": command_error,
-            "page": page,
-            "has_next_page": has_next_page,
-            "source": source,
-            "run_source_filters": RUN_SOURCE_FILTERS,
             "has_running_run": bool(queued) or status_data["has_running_run"],
         },
     )
@@ -385,6 +461,57 @@ def job_runs_status(
         "page": page,
         "has_next_page": len(runs_page) > RUNS_PER_PAGE,
     }
+
+
+@app.get("/logs", dependencies=[Depends(require_auth)])
+def logs_page(
+    request: Request,
+    page: Annotated[int, Query(ge=1)] = 1,
+    job_id: str = "",
+    source: Annotated[str, Query(pattern="^(all|auto|manual)$")] = "all",
+    run_status: Annotated[
+        str, Query(alias="status", pattern="^(all|running|success|failed|timeout)$")
+    ] = "all",
+    start_date: str = "",
+    end_date: str = "",
+):
+    return templates.TemplateResponse(
+        request,
+        "logs.html",
+        logs_context(request, page, job_id, source, run_status, start_date, end_date),
+    )
+
+
+@app.get("/maintenance/logs", dependencies=[Depends(require_auth)])
+def maintenance_logs():
+    return redirect_to("/logs")
+
+
+@app.post("/logs/cleanup", dependencies=[Depends(require_auth)])
+@app.post("/maintenance/logs", dependencies=[Depends(require_auth)])
+def cleanup_logs(
+    request: Request,
+    mode: Annotated[str, Form()],
+    days: Annotated[int, Form()] = 30,
+):
+    errors: list[str] = []
+    result = None
+
+    if mode == "older_than":
+        if days < 1:
+            errors.append("Days must be at least 1")
+        if not errors:
+            result = retention.cleanup_runs_before(retention.cutoff_for_days(days))
+    elif mode == "all":
+        result = retention.cleanup_all_runs()
+    else:
+        errors.append("Cleanup mode is invalid")
+
+    return templates.TemplateResponse(
+        request,
+        "logs.html",
+        logs_context(request, errors=errors, result=result, mode=mode, days=days),
+    )
 
 
 @app.get("/jobs/{job_id}/edit", dependencies=[Depends(require_auth)])
@@ -519,51 +646,6 @@ def cron_preview(request: Request):
         request,
         "cron_preview.html",
         {"request": request, "content": content, "error": error, "cron_file": str(config.CRON_FILE)},
-    )
-
-
-@app.get("/maintenance/logs", dependencies=[Depends(require_auth)])
-def maintenance_logs(request: Request):
-    return templates.TemplateResponse(
-        request,
-        "maintenance_logs.html",
-        {
-            "request": request,
-            "errors": [],
-            "result": None,
-        },
-    )
-
-
-@app.post("/maintenance/logs", dependencies=[Depends(require_auth)])
-def cleanup_logs(
-    request: Request,
-    mode: Annotated[str, Form()],
-    days: Annotated[int, Form()] = 30,
-):
-    errors: list[str] = []
-    result = None
-
-    if mode == "older_than":
-        if days < 1:
-            errors.append("Days must be at least 1")
-        if not errors:
-            result = retention.cleanup_runs_before(retention.cutoff_for_days(days))
-    elif mode == "all":
-        result = retention.cleanup_all_runs()
-    else:
-        errors.append("Cleanup mode is invalid")
-
-    return templates.TemplateResponse(
-        request,
-        "maintenance_logs.html",
-        {
-            "request": request,
-            "errors": errors,
-            "result": result,
-            "mode": mode,
-            "days": days,
-        },
     )
 
 
