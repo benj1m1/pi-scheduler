@@ -134,6 +134,19 @@ def list_jobs() -> list[dict[str, Any]]:
         return [dict(row) for row in rows]
 
 
+def list_jobs_for_cron() -> list[dict[str, Any]]:
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            select id, cron_expr, enabled, deleted_at
+            from jobs
+            where deleted_at is null
+            order by created_at desc
+            """
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
 def get_job(job_id: str) -> dict[str, Any] | None:
     with connect() as conn:
         row = conn.execute(

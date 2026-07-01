@@ -382,6 +382,63 @@ def test_render_cron_file():
     assert "--job-id disabled" not in content
 
 
+def test_render_cron_file_uses_lightweight_job_query(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    db.init_db()
+    enabled_id = db.create_job(
+        {
+            "name": "enabled job",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+        }
+    )
+    disabled_id = db.create_job(
+        {
+            "name": "disabled job",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/10 * * * *",
+            "enabled": 0,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+        }
+    )
+    deleted_id = db.create_job(
+        {
+            "name": "deleted job",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/15 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+        }
+    )
+    db.soft_delete_job(deleted_id)
+
+    def fail_list_jobs():
+        raise AssertionError("render_cron_file should not use the homepage list_jobs query")
+
+    monkeypatch.setattr(db, "list_jobs", fail_list_jobs)
+
+    jobs = db.list_jobs_for_cron()
+    content = cron.render_cron_file()
+
+    assert jobs
+    assert all(set(job) == {"id", "cron_expr", "enabled", "deleted_at"} for job in jobs)
+    assert f"--job-id {enabled_id}" in content
+    assert f"--job-id {disabled_id}" not in content
+    assert f"--job-id {deleted_id}" not in content
+
+
 def test_validate_cron_expr_rejects_six_fields():
     try:
         cron.validate_cron_expr("* * * * * *")

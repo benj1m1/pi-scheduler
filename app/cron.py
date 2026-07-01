@@ -76,7 +76,7 @@ def describe_cron(cron_expr: str) -> str:
 
 
 def render_cron_file(jobs: list[dict] | None = None) -> str:
-    jobs = jobs if jobs is not None else db.list_jobs()
+    jobs = jobs if jobs is not None else db.list_jobs_for_cron()
     lines = [
         "# Managed by pi-scheduler. Do not edit manually.",
         "SHELL=/bin/bash",
