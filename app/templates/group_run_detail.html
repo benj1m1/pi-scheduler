@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Group Run {{ group_run.id }} - Pi Scheduler{% endblock %}
+{% block content %}
+<section class="panel page-panel">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Group run detail</p>
+      <h1>{{ group_run.group_name or group_run.group_id }}</h1>
+    </div>
+    <span class="badge {{ 'ok' if group_run.status == 'success' else 'bad' if group_run.status in ['failed', 'timeout'] else 'muted' }}">{{ group_run.status }}</span>
+  </div>
+  <dl class="wide">
+    <dt>Group</dt><dd><a href="/groups/{{ group_run.group_id }}">{{ group_run.group_name or group_run.group_id }}</a></dd>
+    <dt>Run</dt><dd><code>{{ group_run.id }}</code></dd>
+    <dt>Source</dt><dd>{{ 'manual' if group_run.source == 'manual' else 'auto' }}</dd>
+    <dt>Started</dt><dd>{{ group_run.started_at|beijing_time }}</dd>
+    <dt>Finished</dt><dd>{{ group_run.finished_at|beijing_time }}</dd>
+    <dt>Duration</dt><dd>{{ group_run.duration_ms|seconds_duration }} s</dd>
+    <dt>Error</dt><dd>{{ group_run.error_summary or '' }}</dd>
+  </dl>
+</section>
+
+<section class="panel">
+  <div class="section-head">
+    <div>
+      <h2>Linear Steps</h2>
+      <p class="hint">Each executed member links to its original job run and log files.</p>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table class="data-table">
+      <caption class="sr-only">Steps for group run {{ group_run.id }}</caption>
+      <thead><tr><th scope="col">Step</th><th scope="col">Job</th><th scope="col">Status</th><th scope="col">Started</th><th scope="col">Finished</th><th scope="col">Run</th></tr></thead>
+      <tbody>
+        {% for step in group_run.steps %}
+        <tr>
+          <td>{{ step.position }}</td>
+          <td>
+            {% if step.job_deleted_at %}
+            <span>{{ step.job_name or step.job_id }}</span> <span class="badge muted">deleted</span>
+            {% else %}
+            <a href="/jobs/{{ step.job_id }}">{{ step.job_name or step.job_id }}</a>
+            {% endif %}
+          </td>
+          <td><span class="badge {{ 'ok' if step.status == 'success' else 'bad' if step.status in ['failed', 'timeout'] else 'muted' }}">{{ step.status }}</span>{% if step.error_summary %}<div class="hint">{{ step.error_summary }}</div>{% endif %}</td>
+          <td>{{ step.started_at|beijing_time }}</td>
+          <td>{{ step.finished_at|beijing_time }}</td>
+          <td>{% if step.run_id %}<a class="button button-compact" href="/runs/{{ step.run_id }}">Open logs</a>{% else %}<span class="muted-text">none</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

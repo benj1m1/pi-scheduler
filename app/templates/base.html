@@ -13,6 +13,7 @@
       <a class="brand" href="/" {% if current_path == '/' %}aria-current="page"{% endif %}>Pi Scheduler</a>
       <nav aria-label="Primary">
         <a href="/jobs/new" {% if current_path == '/jobs/new' %}aria-current="page"{% endif %}>New Job</a>
+        <a href="/groups/new" {% if current_path == '/groups/new' %}aria-current="page"{% endif %}>New Group</a>
         <a href="/logs" {% if current_path.startswith('/logs') or current_path.startswith('/runs/') %}aria-current="page"{% endif %}>Logs</a>
         <a href="/cron" {% if current_path == '/cron' %}aria-current="page"{% endif %}>Cron Preview</a>
       </nav>

@@ -8,12 +8,66 @@
     <p>Manage app-owned cron jobs that run Pi prompts, prevent overlapping executions, and write structured logs.</p>
   </div>
   <div class="hero-stat">
-    <strong>{{ jobs|length }}</strong>
-    <span>{{ 'job' if jobs|length == 1 else 'jobs' }}</span>
+    <strong>{{ groups|length + jobs|length }}</strong>
+    <span>scheduled targets</span>
   </div>
 </section>
 
+{% if groups %}
+<section class="panel dashboard-section">
+  <div class="section-head">
+    <div>
+      <p class="eyebrow">Job groups</p>
+      <h2>Linear task chains</h2>
+      <p class="hint">Groups schedule existing jobs in order while each member keeps its own log path.</p>
+    </div>
+    <a class="button" href="/groups/new">New Group</a>
+  </div>
+  <div class="cards">
+    {% for group in groups %}
+    <article class="card group-card">
+      <div class="card-head">
+        <h2><a href="/groups/{{ group.id }}">{{ group.name }}</a></h2>
+        <span class="badge {{ 'ok' if group.enabled else 'muted' }}">{{ 'enabled' if group.enabled else 'disabled' }}</span>
+      </div>
+      <ol class="group-chain" aria-label="Members in {{ group.name }}">
+        {% for member in group.members %}
+        <li><a href="/jobs/{{ member.job_id }}">{{ member.job_name }}</a></li>
+        {% endfor %}
+      </ol>
+      <dl class="job-card-meta">
+        <dt>Schedule</dt><dd>{{ group.cron_expr|describe_cron }}</dd>
+        <dt>Work</dt><dd>{{ group.work_start|describe_work_window(group.work_end) }}</dd>
+        <dt>Next check</dt><dd>{{ group.next_run|beijing_time or 'not scheduled' }}</dd>
+        <dt>Last</dt><dd>{{ group.last_status or 'never run' }} {{ group.last_finished_at|beijing_time }}</dd>
+      </dl>
+      <div class="actions">
+        <a class="button" href="/groups/{{ group.id }}">Details</a>
+        <form method="post" action="/groups/{{ group.id }}/toggle">
+          <input type="hidden" name="return_to" value="index">
+          <button class="{{ 'toggle-disable' if group.enabled else 'toggle-enable' }}">{{ 'Disable' if group.enabled else 'Enable' }}</button>
+        </form>
+        <form method="post" action="/groups/{{ group.id }}/run">
+          <input type="hidden" name="return_to" value="index">
+          <button class="primary" {% if group.has_running_run %}disabled{% endif %}>{{ 'Running' if group.has_running_run else 'Run Now' }}</button>
+        </form>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
 {% if jobs %}
+<section class="panel dashboard-section">
+  <div class="section-head">
+    <div>
+      <p class="eyebrow">Jobs</p>
+      <h2>Task cards</h2>
+      <p class="hint">Standalone jobs can run on their own schedule or as members of a group.</p>
+    </div>
+    <a class="button" href="/jobs/new">New Job</a>
+  </div>
 <div class="cards">
   {% for job in jobs %}
   <article class="card job-card">
@@ -43,7 +97,8 @@
   </article>
   {% endfor %}
 </div>
-{% else %}
+</section>
+{% elif not groups %}
 <div class="empty empty-state">
   <h2>No jobs yet</h2>
   <p class="hint">Create a scheduled prompt to start collecting run history.</p>

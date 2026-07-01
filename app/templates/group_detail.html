@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}{{ group.name }} - Pi Scheduler{% endblock %}
+{% block content %}
+<section class="panel page-panel">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Job group detail</p>
+      <h1>{{ group.name }}</h1>
+    </div>
+    <span class="badge {{ 'ok' if group.enabled else 'muted' }}">{{ 'enabled' if group.enabled else 'disabled' }}</span>
+  </div>
+  <dl class="wide">
+    <dt>Members</dt>
+    <dd>
+      <ol class="group-chain group-chain-large" aria-label="Members in {{ group.name }}">
+        {% for member in group.members %}
+        <li><a href="/jobs/{{ member.job_id }}">{{ member.job_name }}</a></li>
+        {% endfor %}
+      </ol>
+    </dd>
+    <dt>Schedule</dt><dd>{{ group.cron_expr|describe_cron }}</dd>
+    <dt>Work window</dt><dd>{{ group.work_start|describe_work_window(group.work_end) }}</dd>
+    <dt>Cron</dt><dd><code>{{ group.cron_expr }}</code></dd>
+    <dt>Overlap</dt><dd>{{ 'prevented' if group.prevent_overlap else 'allowed' }}</dd>
+    <dt>Member guards</dt><dd>Member enabled states and work windows do not gate group execution. Member overlap still applies.</dd>
+  </dl>
+  <div class="actions">
+    <a class="button" href="/groups/{{ group.id }}/edit">Edit</a>
+    <form method="post" action="/groups/{{ group.id }}/toggle">
+      <input type="hidden" name="return_to" value="detail">
+      <button class="{{ 'toggle-disable' if group.enabled else 'toggle-enable' }}">{{ 'Disable' if group.enabled else 'Enable' }}</button>
+    </form>
+    <form method="post" action="/groups/{{ group.id }}/run">
+      <button class="primary" {% if has_running_run %}disabled{% endif %}>{{ 'Running' if has_running_run else 'Run Now' }}</button>
+    </form>
+    <form method="post" action="/groups/{{ group.id }}/delete"><button class="danger">Delete</button></form>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="section-head">
+    <div>
+      <h2>Recent Group Runs</h2>
+      <p class="hint">Latest group executions. Open a group run to inspect each linear step.</p>
+    </div>
+  </div>
+  {% if runs %}
+  <div class="table-wrap">
+    <table class="data-table">
+      <caption class="sr-only">Recent group runs for {{ group.name }}</caption>
+      <thead><tr><th scope="col">Started</th><th scope="col">Source</th><th scope="col">Status</th><th scope="col">Duration</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+      <tbody>
+        {% for run in runs %}
+        <tr>
+          <td>{{ run.started_at|beijing_time }}</td>
+          <td>{{ 'manual' if run.source == 'manual' else 'auto' }}</td>
+          <td><span class="badge {{ 'ok' if run.status == 'success' else 'bad' if run.status in ['failed', 'timeout'] else 'muted' }}">{{ run.status }}</span></td>
+          <td>{{ run.duration_ms|seconds_duration }} s</td>
+          <td><a class="button button-compact" href="/groups/{{ group.id }}/runs/{{ run.id }}">View</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p>No group runs yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

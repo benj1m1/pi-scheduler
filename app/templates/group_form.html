@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} - Pi Scheduler{% endblock %}
+{% block content %}
+<section class="panel">
+  <div class="section-head">
+    <div>
+      <p class="eyebrow">Group configuration</p>
+      <h1>{{ title }}</h1>
+      <p class="hint">Schedule existing jobs as a linear chain. Group timing controls when the chain starts; member jobs keep their own prompt, model, timeout, tools, and log paths.</p>
+    </div>
+  </div>
+  {% if errors %}
+  <div class="errors" role="alert">
+    {% for error in errors %}<p>{{ error }}</p>{% endfor %}
+  </div>
+  {% endif %}
+  <form class="stack" method="post" action="{{ action }}">
+    <label>Name <input name="name" value="{{ group.name }}" required></label>
+    <fieldset>
+      <legend>Members</legend>
+      <p class="hint">Pick each step in execution order. Blank steps are ignored; the same job can only appear once.</p>
+      <div class="member-slots">
+        {% for selected_job_id in member_slots %}
+        <label>Step {{ loop.index }}
+          <select name="member_job_ids">
+            <option value="">No job</option>
+            {% for job in jobs %}
+            <option value="{{ job.id }}" {% if selected_job_id == job.id %}selected{% endif %}>{{ job.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        {% endfor %}
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Schedule</legend>
+      <div class="inline-fields">
+        <label>Every <input name="schedule_every" type="number" min="1" max="59" value="{{ group.schedule_every }}" required></label>
+        <label>Unit
+          <select name="schedule_unit" required>
+            <option value="minutes" {% if group.schedule_unit == 'minutes' %}selected{% endif %}>minutes</option>
+            <option value="hours" {% if group.schedule_unit == 'hours' %}selected{% endif %}>hours</option>
+          </select>
+        </label>
+      </div>
+      <p class="hint">Runs as app-owned cron. Minutes support 1-59; hours support 1-23.</p>
+    </fieldset>
+    <fieldset>
+      <legend>Work window</legend>
+      <div class="inline-fields">
+        <label>Start
+          <select id="work-start" name="work_start">
+            <option value="" {% if not group.work_start %}selected{% endif %}>All day</option>
+            {% for option in hour_options %}
+            <option value="{{ option.value }}" {% if group.work_start == option.value %}selected{% endif %}>{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>End
+          <select id="work-end" name="work_end">
+            <option value="" {% if not group.work_end %}selected{% endif %}>All day</option>
+            {% for option in hour_options %}
+            <option value="{{ option.value }}" {% if group.work_end == option.value %}selected{% endif %}>{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+      <p class="hint">Uses Beijing time. Member job work windows do not gate group execution.</p>
+      <p id="work-window-status" class="window-status" aria-live="polite"></p>
+    </fieldset>
+    <label class="check"><input type="checkbox" name="enabled" {% if group.enabled %}checked{% endif %}> Enabled</label>
+    <label class="check forced-check"><input type="checkbox" name="prevent_overlap" checked disabled> Prevent overlap</label>
+    <div class="actions">
+      <button class="primary" type="submit">Save</button>
+      <a class="button" href="/">Cancel</a>
+    </div>
+  </form>
+</section>
+<script>
+  (() => {
+    const start = document.getElementById("work-start");
+    const end = document.getElementById("work-end");
+    const status = document.getElementById("work-window-status");
+    if (!start || !end || !status) return;
+
+    const updateStatus = () => {
+      if (!start.value && !end.value) {
+        status.textContent = "All day";
+        status.className = "window-status muted-text";
+        return;
+      }
+      if (!start.value || !end.value) {
+        status.textContent = "Select both start and end, or leave both as All day.";
+        status.className = "window-status bad-text";
+        return;
+      }
+      if (start.value === end.value) {
+        status.textContent = "Start and end must be different.";
+        status.className = "window-status bad-text";
+        return;
+      }
+      if (start.value > end.value) {
+        status.textContent = "Overnight window";
+        status.className = "window-status badge muted";
+        return;
+      }
+      status.textContent = "Same-day window";
+      status.className = "window-status muted-text";
+    };
+
+    start.addEventListener("change", updateStatus);
+    end.addEventListener("change", updateStatus);
+    updateStatus();
+  })();
+</script>
+{% endblock %}

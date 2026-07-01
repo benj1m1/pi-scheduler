@@ -75,8 +75,12 @@ def describe_cron(cron_expr: str) -> str:
     return cron_expr
 
 
-def render_cron_file(jobs: list[dict] | None = None) -> str:
-    jobs = jobs if jobs is not None else db.list_jobs_for_cron()
+def render_cron_file(jobs: list[dict] | None = None, groups: list[dict] | None = None) -> str:
+    if jobs is None:
+        jobs = db.list_jobs_for_cron()
+        groups = db.list_groups_for_cron() if groups is None else groups
+    elif groups is None:
+        groups = []
     lines = [
         "# Managed by pi-scheduler. Do not edit manually.",
         "SHELL=/bin/bash",
@@ -91,6 +95,14 @@ def render_cron_file(jobs: list[dict] | None = None) -> str:
         validate_cron_expr(job["cron_expr"])
         lines.append(
             f"{job['cron_expr']} {config.CRON_USER} {config.RUNNER_PATH} --job-id {job['id']}"
+        )
+
+    for group in groups:
+        if group.get("deleted_at") or not int(group.get("enabled", 0)):
+            continue
+        validate_cron_expr(group["cron_expr"])
+        lines.append(
+            f"{group['cron_expr']} {config.CRON_USER} {config.RUNNER_PATH} --group-id {group['id']}"
         )
 
     lines.append("")

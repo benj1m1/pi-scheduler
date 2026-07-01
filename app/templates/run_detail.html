@@ -12,6 +12,7 @@
   <dl class="wide">
     {% set command_collapsible = run.command|length > 260 %}
     <dt>Job</dt><dd><a href="/jobs/{{ run.job_id }}">{{ job.name if job else run.job_id }}</a></dd>
+    {% if run.group_run_id %}<dt>Group run</dt><dd><a href="{{ group_run_url }}">{{ run.group_name or run.group_id }}</a></dd>{% endif %}
     <dt>Source</dt><dd>{{ 'manual' if run.source == 'manual' else 'auto' }}</dd>
     <dt>Status</dt><dd><span class="badge {{ 'ok' if run.status == 'success' else 'bad' if run.status in ['failed', 'timeout'] else 'muted' }}">{{ run.status }}</span></dd>
     <dt>Started</dt><dd>{{ run.started_at|beijing_time }}</dd>

@@ -104,6 +104,64 @@ def test_db_defaults_new_jobs_to_summary_without_session(tmp_path, monkeypatch):
     assert job["tool_mode"] == "full"
 
 
+def test_db_creates_ordered_job_groups_and_blocks_member_delete(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    db.init_db()
+    agent_id = db.create_job(
+        {
+            "name": "agent",
+            "skill_name": "general",
+            "task_prompt": "run agent",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+        }
+    )
+    qa_id = db.create_job(
+        {
+            "name": "qa",
+            "skill_name": "general",
+            "task_prompt": "run qa",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+        }
+    )
+
+    group_id = db.create_group(
+        {"name": "review flow", "cron_expr": "*/10 * * * *", "enabled": 1},
+        [agent_id, qa_id],
+    )
+    group = db.get_group_with_members(group_id)
+
+    assert group["prevent_overlap"] == 1
+    assert [member["job_id"] for member in group["members"]] == [agent_id, qa_id]
+    assert [member["position"] for member in group["members"]] == [1, 2]
+
+    try:
+        db.create_group(
+            {"name": "bad flow", "cron_expr": "*/10 * * * *", "enabled": 1},
+            [agent_id, agent_id],
+        )
+    except ValueError as exc:
+        assert "only appear once" in str(exc)
+    else:
+        raise AssertionError("Expected duplicate member rejection")
+
+    try:
+        db.soft_delete_job(agent_id)
+    except ValueError as exc:
+        assert "review flow" in str(exc)
+    else:
+        raise AssertionError("Expected referenced job delete rejection")
+
+
 def test_db_init_creates_performance_indexes(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
     monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
@@ -189,6 +247,62 @@ def test_db_migrates_existing_jobs_to_events_with_saved_sessions(tmp_path, monke
     assert job["output_mode"] == "events"
     assert job["session_mode"] == "save"
     assert job["tool_mode"] == "full"
+
+
+def test_db_migrates_existing_runs_for_group_context(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    with db.connect() as conn:
+        conn.executescript(
+            """
+            create table jobs (
+              id text primary key,
+              name text not null,
+              skill_name text not null,
+              task_prompt text not null,
+              cron_expr text not null,
+              enabled integer not null default 1,
+              timeout_seconds integer not null default 240,
+              prevent_overlap integer not null default 1,
+              output_mode text not null default 'summary',
+              session_mode text not null default 'no_session',
+              tool_mode text not null default 'full',
+              created_at text not null,
+              updated_at text not null,
+              deleted_at text
+            );
+            create table runs (
+              id text primary key,
+              job_id text not null,
+              started_at text not null,
+              finished_at text,
+              status text not null,
+              exit_code integer,
+              duration_ms integer,
+              command text not null,
+              stdout_path text,
+              stderr_path text,
+              jsonl_path text,
+              error_summary text,
+              foreign key (job_id) references jobs(id)
+            );
+            """
+        )
+
+    db.init_db()
+
+    with db.connect() as conn:
+        run_columns = {row[1] for row in conn.execute("pragma table_info(runs)").fetchall()}
+        index = conn.execute(
+            "select name from sqlite_master where type = 'index' and name = 'idx_runs_group_run_id'"
+        ).fetchone()
+
+        assert "source" in run_columns
+        assert "group_run_id" in run_columns
+    assert index is not None
 
 
 def test_build_command_uses_argv():
@@ -382,6 +496,29 @@ def test_render_cron_file():
     assert "--job-id disabled" not in content
 
 
+def test_render_cron_file_includes_enabled_groups():
+    content = cron.render_cron_file(
+        jobs=[],
+        groups=[
+            {
+                "id": "review-flow",
+                "cron_expr": "*/10 * * * *",
+                "enabled": 1,
+                "deleted_at": None,
+            },
+            {
+                "id": "disabled-flow",
+                "cron_expr": "*/10 * * * *",
+                "enabled": 0,
+                "deleted_at": None,
+            },
+        ],
+    )
+
+    assert "/bin/pi-job-runner --group-id review-flow" in content
+    assert "--group-id disabled-flow" not in content
+
+
 def test_render_cron_file_uses_lightweight_job_query(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
     monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
@@ -437,6 +574,45 @@ def test_render_cron_file_uses_lightweight_job_query(tmp_path, monkeypatch):
     assert f"--job-id {enabled_id}" in content
     assert f"--job-id {disabled_id}" not in content
     assert f"--job-id {deleted_id}" not in content
+
+
+def test_render_cron_file_uses_lightweight_group_query(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "agent",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+        }
+    )
+    enabled_group_id = db.create_group(
+        {"name": "review flow", "cron_expr": "*/10 * * * *", "enabled": 1}, [job_id]
+    )
+    disabled_group_id = db.create_group(
+        {"name": "disabled flow", "cron_expr": "*/15 * * * *", "enabled": 0}, [job_id]
+    )
+
+    def fail_list_groups():
+        raise AssertionError("render_cron_file should not use the homepage list_groups query")
+
+    monkeypatch.setattr(db, "list_groups", fail_list_groups)
+
+    groups = db.list_groups_for_cron()
+    content = cron.render_cron_file()
+
+    assert groups
+    assert all(set(group) == {"id", "cron_expr", "enabled", "deleted_at"} for group in groups)
+    assert f"--group-id {enabled_group_id}" in content
+    assert f"--group-id {disabled_group_id}" not in content
 
 
 def test_validate_cron_expr_rejects_six_fields():
@@ -777,6 +953,138 @@ def test_manual_runner_bypasses_disabled_state_and_work_window(tmp_path, monkeyp
     assert len(runs) == 1
     assert runs[0]["source"] == "manual"
     assert runs[0]["status"] == "success"
+
+
+def test_group_runner_executes_members_in_order_and_keeps_job_logs(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+    monkeypatch.setattr(config, "CRON_FILE", tmp_path / "pi-agent-jobs")
+
+    prompts = []
+
+    class Result:
+        stderr = ""
+        returncode = 0
+
+        def __init__(self, stdout):
+            self.stdout = stdout
+
+    def fake_run(argv, **kwargs):
+        prompts.append(argv[-1])
+        return Result(f"summary for {argv[-1]}\n")
+
+    monkeypatch.setattr(runner.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        runner.work_window,
+        "is_within_window",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("member window should not be checked")),
+    )
+
+    db.init_db()
+    agent_id = db.create_job(
+        {
+            "name": "agent",
+            "skill_name": "general",
+            "task_prompt": "run agent",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+            "output_mode": "summary",
+            "session_mode": "no_session",
+        }
+    )
+    qa_id = db.create_job(
+        {
+            "name": "qa",
+            "skill_name": "general",
+            "task_prompt": "run qa",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 0,
+            "work_start": "09:00",
+            "work_end": "18:00",
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+            "output_mode": "summary",
+            "session_mode": "no_session",
+        }
+    )
+    group_id = db.create_group(
+        {"name": "review flow", "cron_expr": "*/10 * * * *", "enabled": 1},
+        [agent_id, qa_id],
+    )
+
+    exit_code = runner.run_group(group_id, source="manual")
+    group_run = db.get_group_run_with_steps(db.list_group_runs(group_id)[0]["id"])
+
+    assert exit_code == 0
+    assert prompts == ["run agent", "run qa"]
+    assert group_run["status"] == "success"
+    assert [step["status"] for step in group_run["steps"]] == ["success", "success"]
+    assert [step["run_id"] is not None for step in group_run["steps"]] == [True, True]
+
+    agent_run = db.get_run(group_run["steps"][0]["run_id"])
+    qa_run = db.get_run(group_run["steps"][1]["run_id"])
+    assert agent_run["group_run_id"] == group_run["id"]
+    assert qa_run["group_run_id"] == group_run["id"]
+    assert f"/jobs/{agent_id}/runs/" in agent_run["stdout_path"]
+    assert f"/jobs/{qa_id}/runs/" in qa_run["stdout_path"]
+
+
+def test_group_runner_stops_after_failed_member(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+    monkeypatch.setattr(config, "CRON_FILE", tmp_path / "pi-agent-jobs")
+
+    prompts = []
+
+    class Result:
+        stderr = "failed"
+
+        def __init__(self, prompt):
+            self.stdout = ""
+            self.returncode = 1 if prompt == "run qa" else 0
+
+    def fake_run(argv, **kwargs):
+        prompts.append(argv[-1])
+        return Result(argv[-1])
+
+    monkeypatch.setattr(runner.subprocess, "run", fake_run)
+
+    db.init_db()
+    job_ids = []
+    for name in ["agent", "qa", "reviewer"]:
+        job_ids.append(
+            db.create_job(
+                {
+                    "name": name,
+                    "skill_name": "general",
+                    "task_prompt": f"run {name}",
+                    "cron_expr": "*/5 * * * *",
+                    "enabled": 1,
+                    "timeout_seconds": 240,
+                    "prevent_overlap": 1,
+                    "output_mode": "summary",
+                    "session_mode": "no_session",
+                }
+            )
+        )
+    group_id = db.create_group(
+        {"name": "review flow", "cron_expr": "*/10 * * * *", "enabled": 1}, job_ids
+    )
+
+    exit_code = runner.run_group(group_id, source="manual")
+    group_run = db.get_group_run_with_steps(db.list_group_runs(group_id)[0]["id"])
+
+    assert exit_code == 1
+    assert prompts == ["run agent", "run qa"]
+    assert group_run["status"] == "failed"
+    assert [step["status"] for step in group_run["steps"]] == ["success", "failed", "skipped"]
+    assert group_run["steps"][2]["run_id"] is None
 
 
 def test_summary_mode_runs_print_and_writes_summary_without_jsonl(tmp_path, monkeypatch):
@@ -1368,6 +1676,43 @@ def test_manual_run_from_index_returns_to_index(tmp_path, monkeypatch):
     assert response.status_code == 303
     assert response.headers["location"] == f"/?queued={job_id}"
     assert tasks.calls == [(runner.run_job, (job_id,), {"source": "manual"})]
+
+
+def test_manual_group_run_queues_background_task(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "pi-agent",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+        }
+    )
+    group_id = db.create_group(
+        {"name": "review flow", "cron_expr": "*/10 * * * *", "enabled": 1}, [job_id]
+    )
+
+    class Tasks:
+        def __init__(self):
+            self.calls = []
+
+        def add_task(self, func, *args, **kwargs):
+            self.calls.append((func, args, kwargs))
+
+    tasks = Tasks()
+    response = web.manual_group_run(group_id, tasks, return_to="index")
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/?queued={group_id}"
+    assert tasks.calls == [(runner.run_group, (group_id,), {"source": "manual"})]
 
 
 def test_read_log_limits_large_files(tmp_path):

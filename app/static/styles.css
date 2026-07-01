@@ -189,6 +189,7 @@ p { line-height: 1.55; }
 .hero-stat span { color: var(--text-soft); font-size: 0.86rem; font-weight: 800; }
 
 .cards { display: grid; gap: var(--space-4); grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); }
+.dashboard-section { display: grid; gap: var(--space-4); }
 .card, .panel, .empty {
   background: rgb(255 250 241 / 94%);
   border: 1px solid var(--border);
@@ -225,6 +226,35 @@ p { line-height: 1.55; }
   overflow: hidden;
 }
 .job-card .card-head .badge { flex: 0 0 auto; }
+.group-card .card-head { align-items: flex-start; }
+.group-chain {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  list-style: none;
+  margin: 0 0 var(--space-4);
+  padding: 0;
+}
+.group-chain li {
+  align-items: center;
+  background: var(--surface-warm);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-soft);
+  display: inline-flex;
+  font-size: 0.9rem;
+  font-weight: 900;
+  min-height: 2rem;
+  padding: 0.35rem 0.7rem;
+}
+.group-chain li:not(:last-child)::after {
+  color: var(--primary);
+  content: "→";
+  margin-left: 0.5rem;
+}
+.group-chain-large { margin-bottom: 0; }
+.group-chain-large li { border-radius: var(--radius-sm); }
+.member-slots { display: grid; gap: var(--space-3); grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-top: var(--space-3); }
 
 dl { display: grid; gap: 0.45rem 0.9rem; grid-template-columns: 6.5rem 1fr; margin: 0; }
 .wide { grid-template-columns: 8.5rem 1fr; }

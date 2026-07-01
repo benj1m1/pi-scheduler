@@ -95,6 +95,12 @@ def logs_path(filters: dict[str, str], page: int) -> str:
     return f"/logs?{query}" if query else "/logs"
 
 
+def group_run_path(group_run_id: str, group_id: str | None = None) -> str:
+    if group_id:
+        return f"/groups/{group_id}/runs/{group_run_id}"
+    return f"/group-runs/{group_run_id}"
+
+
 def parse_beijing_day(value: str, next_day: bool = False) -> str | None:
     if not value:
         return None
@@ -170,6 +176,7 @@ templates.env.filters["beijing_time"] = beijing_time
 templates.env.filters["seconds_duration"] = seconds_duration
 templates.env.filters["describe_cron"] = cron.describe_cron
 templates.env.filters["describe_work_window"] = work_window.describe
+templates.env.filters["group_run_path"] = group_run_path
 
 
 def require_auth(credentials: Annotated[HTTPBasicCredentials, Depends(security)]) -> str:
@@ -328,14 +335,102 @@ def job_form_context(request: Request, job: dict, errors: list[str], action: str
     }
 
 
+def group_form_data(
+    name: str,
+    schedule_every: str,
+    schedule_unit: str,
+    work_start: str,
+    work_end: str,
+    enabled: str | None,
+    member_job_ids: list[str] | None,
+) -> dict:
+    cron_expr = ""
+    schedule_error = None
+    try:
+        cron_expr = cron.interval_to_cron(schedule_every.strip(), schedule_unit)
+    except ValueError as exc:
+        schedule_error = str(exc)
+    members = [job_id for job_id in (member_job_ids or []) if job_id]
+    return {
+        "name": name.strip(),
+        "cron_expr": cron_expr,
+        "schedule_every": schedule_every.strip(),
+        "schedule_unit": schedule_unit,
+        "schedule_error": schedule_error,
+        "work_start": work_start.strip() or None,
+        "work_end": work_end.strip() or None,
+        "enabled": parse_bool(enabled),
+        "prevent_overlap": 1,
+        "member_job_ids": members,
+    }
+
+
+def validate_group_form(data: dict) -> list[str]:
+    errors: list[str] = []
+    if not data["name"].strip():
+        errors.append("Name is required")
+    if data.get("schedule_error"):
+        errors.append(data["schedule_error"])
+    elif data.get("cron_expr"):
+        try:
+            cron.validate_cron_expr(data["cron_expr"])
+        except ValueError as exc:
+            errors.append(str(exc))
+    try:
+        work_window.validate(data.get("work_start"), data.get("work_end"))
+    except ValueError as exc:
+        errors.append(str(exc))
+    members = data.get("member_job_ids", [])
+    if not members:
+        errors.append("Choose at least one job")
+    if len(set(members)) != len(members):
+        errors.append("A job can only appear once in a group")
+    active_job_ids = {job["id"] for job in db.list_jobs()}
+    if any(job_id not in active_job_ids for job_id in members):
+        errors.append("Group members must be active jobs")
+    return errors
+
+
+def with_group_schedule(group: dict) -> dict:
+    group = dict(group)
+    schedule = cron.cron_to_interval(group.get("cron_expr", "*/5 * * * *"))
+    group["schedule_every"] = schedule["every"]
+    group["schedule_unit"] = schedule["unit"]
+    group["work_start"] = group.get("work_start") or ""
+    group["work_end"] = group.get("work_end") or ""
+    group["member_job_ids"] = [member["job_id"] for member in group.get("members", [])]
+    return group
+
+
+def group_form_context(request: Request, group: dict, errors: list[str], action: str, title: str) -> dict:
+    member_job_ids = list(group.get("member_job_ids", []))
+    slot_count = max(8, len(member_job_ids) + 2)
+    member_slots = member_job_ids + [""] * (slot_count - len(member_job_ids))
+    return {
+        "request": request,
+        "group": group,
+        "errors": errors,
+        "action": action,
+        "title": title,
+        "jobs": db.list_jobs(),
+        "member_slots": member_slots,
+        "hour_options": hour_options(),
+    }
+
+
 @app.get("/", dependencies=[Depends(require_auth)])
 def index(request: Request, queued: str = ""):
     jobs = db.list_jobs()
+    groups = db.list_groups()
     for job in jobs:
         job["next_run"] = cron.next_run(job["cron_expr"]) if job.get("enabled") else None
         if queued and job["id"] == queued:
             job["has_running_run"] = 1
-    return templates.TemplateResponse(request, "index.html", {"request": request, "jobs": jobs})
+    for group in groups:
+        group["next_run"] = cron.next_run(group["cron_expr"]) if group.get("enabled") else None
+        if queued and group["id"] == queued:
+            group["has_running_run"] = 1
+    return templates.TemplateResponse(request, "index.html", {"request": request, "jobs": jobs, "groups": groups})
 
 
 @app.get("/jobs/new", dependencies=[Depends(require_auth)])
@@ -409,6 +504,169 @@ def create_job(
     job_id = db.create_job(data)
     cron.write_cron_file()
     return redirect_to(f"/jobs/{job_id}")
+
+
+@app.get("/groups/new", dependencies=[Depends(require_auth)])
+def new_group(request: Request):
+    group = {
+        "name": "",
+        "cron_expr": "*/5 * * * *",
+        "schedule_every": "5",
+        "schedule_unit": "minutes",
+        "work_start": "",
+        "work_end": "",
+        "enabled": 1,
+        "prevent_overlap": 1,
+        "member_job_ids": [],
+    }
+    return templates.TemplateResponse(
+        request,
+        "group_form.html",
+        group_form_context(request, group, [], "/groups", "New Job Group"),
+    )
+
+
+@app.post("/groups", dependencies=[Depends(require_auth)])
+def create_group(
+    request: Request,
+    name: Annotated[str, Form()],
+    schedule_every: Annotated[str, Form()],
+    schedule_unit: Annotated[str, Form()],
+    work_start: Annotated[str, Form()] = "",
+    work_end: Annotated[str, Form()] = "",
+    enabled: Annotated[str | None, Form()] = None,
+    member_job_ids: Annotated[list[str] | None, Form()] = None,
+):
+    data = group_form_data(name, schedule_every, schedule_unit, work_start, work_end, enabled, member_job_ids)
+    errors = validate_group_form(data)
+    if errors:
+        return templates.TemplateResponse(
+            request,
+            "group_form.html",
+            group_form_context(request, data, errors, "/groups", "New Job Group"),
+            status_code=400,
+        )
+    group_id = db.create_group(data, data["member_job_ids"])
+    cron.write_cron_file()
+    return redirect_to(f"/groups/{group_id}")
+
+
+@app.get("/groups/{group_id}", dependencies=[Depends(require_auth)])
+def group_detail(
+    request: Request,
+    group_id: str,
+    queued: Annotated[int, Query(ge=0, le=1)] = 0,
+):
+    group = db.get_group_with_members(group_id)
+    if group is None:
+        raise HTTPException(status_code=404, detail="Group not found")
+    runs = db.list_group_runs(group_id, RUNS_PER_PAGE)
+    return templates.TemplateResponse(
+        request,
+        "group_detail.html",
+        {
+            "request": request,
+            "group": group,
+            "runs": runs,
+            "has_running_run": bool(queued) or db.has_running_group_run(group_id),
+        },
+    )
+
+
+@app.get("/groups/{group_id}/edit", dependencies=[Depends(require_auth)])
+def edit_group(request: Request, group_id: str):
+    group = db.get_group_with_members(group_id)
+    if group is None:
+        raise HTTPException(status_code=404, detail="Group not found")
+    return templates.TemplateResponse(
+        request,
+        "group_form.html",
+        group_form_context(request, with_group_schedule(group), [], f"/groups/{group_id}", "Edit Job Group"),
+    )
+
+
+@app.post("/groups/{group_id}", dependencies=[Depends(require_auth)])
+def update_group(
+    request: Request,
+    group_id: str,
+    name: Annotated[str, Form()],
+    schedule_every: Annotated[str, Form()],
+    schedule_unit: Annotated[str, Form()],
+    work_start: Annotated[str, Form()] = "",
+    work_end: Annotated[str, Form()] = "",
+    enabled: Annotated[str | None, Form()] = None,
+    member_job_ids: Annotated[list[str] | None, Form()] = None,
+):
+    if db.get_group(group_id) is None:
+        raise HTTPException(status_code=404, detail="Group not found")
+    data = group_form_data(name, schedule_every, schedule_unit, work_start, work_end, enabled, member_job_ids)
+    errors = validate_group_form(data)
+    if errors:
+        data["id"] = group_id
+        return templates.TemplateResponse(
+            request,
+            "group_form.html",
+            group_form_context(request, data, errors, f"/groups/{group_id}", "Edit Job Group"),
+            status_code=400,
+        )
+    db.update_group(group_id, data, data["member_job_ids"])
+    cron.write_cron_file()
+    return redirect_to(f"/groups/{group_id}")
+
+
+@app.post("/groups/{group_id}/toggle", dependencies=[Depends(require_auth)])
+def toggle_group(group_id: str, return_to: Annotated[str, Form()] = ""):
+    group = db.get_group(group_id)
+    if group is None:
+        raise HTTPException(status_code=404, detail="Group not found")
+    db.set_group_enabled(group_id, not bool(group["enabled"]))
+    cron.write_cron_file()
+    if return_to == "detail":
+        return redirect_to(f"/groups/{group_id}")
+    return redirect_to("/")
+
+
+@app.post("/groups/{group_id}/delete", dependencies=[Depends(require_auth)])
+def delete_group(group_id: str):
+    if db.get_group(group_id) is None:
+        raise HTTPException(status_code=404, detail="Group not found")
+    db.soft_delete_group(group_id)
+    cron.write_cron_file()
+    return redirect_to("/")
+
+
+@app.post("/groups/{group_id}/run", dependencies=[Depends(require_auth)])
+def manual_group_run(
+    group_id: str,
+    background_tasks: BackgroundTasks,
+    return_to: Annotated[str, Form()] = "",
+):
+    if db.get_group(group_id) is None:
+        raise HTTPException(status_code=404, detail="Group not found")
+    background_tasks.add_task(runner.run_group, group_id, source="manual")
+    if return_to == "index":
+        return redirect_to(f"/?queued={group_id}")
+    return redirect_to(f"/groups/{group_id}?queued=1")
+
+
+@app.get("/groups/{group_id}/runs/{group_run_id}", dependencies=[Depends(require_auth)])
+def group_run_detail(request: Request, group_id: str, group_run_id: str):
+    group_run = db.get_group_run_with_steps(group_run_id)
+    if group_run is None or group_run["group_id"] != group_id:
+        raise HTTPException(status_code=404, detail="Group run not found")
+    return templates.TemplateResponse(
+        request,
+        "group_run_detail.html",
+        {"request": request, "group_run": group_run},
+    )
+
+
+@app.get("/group-runs/{group_run_id}", dependencies=[Depends(require_auth)])
+def group_run_redirect(group_run_id: str):
+    group_run = db.get_group_run_with_steps(group_run_id)
+    if group_run is None:
+        raise HTTPException(status_code=404, detail="Group run not found")
+    return redirect_to(f"/groups/{group_run['group_id']}/runs/{group_run_id}")
 
 
 @app.get("/jobs/{job_id}", dependencies=[Depends(require_auth)])
@@ -592,7 +850,10 @@ def toggle_job(job_id: str, return_to: Annotated[str, Form()] = ""):
 def delete_job(job_id: str):
     if db.get_job(job_id) is None:
         raise HTTPException(status_code=404, detail="Job not found")
-    db.soft_delete_job(job_id)
+    try:
+        db.soft_delete_job(job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     cron.write_cron_file()
     return redirect_to("/")
 
@@ -632,6 +893,7 @@ def run_detail(request: Request, run_id: str):
             "stderr": stderr,
             "jsonl": jsonl,
             "has_jsonl": has_jsonl,
+            "group_run_url": group_run_path(run["group_run_id"], run.get("group_id")) if run.get("group_run_id") else "",
         },
     )
 

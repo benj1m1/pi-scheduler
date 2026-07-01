@@ -98,7 +98,7 @@
     <table class="data-table logs-table">
       <caption class="sr-only">Filtered job run results</caption>
       <thead>
-        <tr><th scope="col">Started</th><th scope="col">Job</th><th scope="col">Source</th><th scope="col">Status</th><th scope="col">Duration</th><th scope="col">Logs</th><th scope="col"><span class="sr-only">Actions</span></th></tr>
+        <tr><th scope="col">Started</th><th scope="col">Job</th><th scope="col">Group</th><th scope="col">Source</th><th scope="col">Status</th><th scope="col">Duration</th><th scope="col">Logs</th><th scope="col"><span class="sr-only">Actions</span></th></tr>
       </thead>
       <tbody>
         {% for run in runs %}
@@ -109,6 +109,13 @@
             <span>{{ run.job_name or run.job_id }}</span> <span class="badge muted">deleted</span>
             {% else %}
             <a href="/jobs/{{ run.job_id }}">{{ run.job_name or run.job_id }}</a>
+            {% endif %}
+          </td>
+          <td>
+            {% if run.group_run_id %}
+            <a class="badge muted" href="{{ run.group_run_id|group_run_path(run.group_id) }}">{{ run.group_name or run.group_id }}</a>
+            {% else %}
+            <span class="muted-text">standalone</span>
             {% endif %}
           </td>
           <td>{{ 'manual' if run.source == 'manual' else 'auto' }}</td>

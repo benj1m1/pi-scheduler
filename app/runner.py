@@ -7,10 +7,19 @@ import shlex
 import subprocess
 import time
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 from . import config, cron, db, pi_models, retention, work_window
+
+
+@dataclass
+class JobExecutionResult:
+    run_id: str | None
+    status: str
+    exit_code: int
+    error_summary: str | None = None
 
 
 def build_prompt(job: dict) -> str:
@@ -185,6 +194,7 @@ def create_terminal_run(
     command: str,
     error_summary: str | None = None,
     source: str = "auto",
+    group_run_id: str | None = None,
 ) -> str:
     now = db.utc_now()
     run_id = new_run_id(job_id)
@@ -192,6 +202,7 @@ def create_terminal_run(
         {
             "id": run_id,
             "job_id": job_id,
+            "group_run_id": group_run_id,
             "source": source,
             "started_at": now,
             "finished_at": now,
@@ -204,26 +215,26 @@ def create_terminal_run(
     return run_id
 
 
-def run_job(job_id: str, source: str = "auto") -> int:
-    db.init_db()
-    retention.cleanup_old_logs()
-    job = db.get_job(job_id)
-    if job is None:
-        return 1
-
+def execute_job(
+    job: dict,
+    source: str = "auto",
+    apply_job_schedule_guards: bool = True,
+    group_run_id: str | None = None,
+) -> JobExecutionResult:
+    job_id = job["id"]
     manual = source == "manual"
-    if not manual and not int(job.get("enabled", 0)):
+    if apply_job_schedule_guards and not manual and not int(job.get("enabled", 0)):
         cron.write_cron_file()
-        return 0
-    if not manual and not work_window.is_within_window(job.get("work_start"), job.get("work_end")):
-        return 0
+        return JobExecutionResult(None, "disabled", 0)
+    if apply_job_schedule_guards and not manual and not work_window.is_within_window(job.get("work_start"), job.get("work_end")):
+        return JobExecutionResult(None, "outside_work_window", 0)
 
     try:
         _, command_display = build_command(job)
     except pi_models.ModelConfigError as exc:
         _, command_display = build_command(job, validate_model=False)
-        create_terminal_run(job_id, "failed", command_display, str(exc), source)
-        return 1
+        run_id = create_terminal_run(job_id, "failed", command_display, str(exc), source, group_run_id)
+        return JobExecutionResult(run_id, "failed", 1, str(exc))
 
     lock_handle = None
     lock_path = config.LOCK_DIR / f"{job_id}.lock"
@@ -233,8 +244,15 @@ def run_job(job_id: str, source: str = "auto") -> int:
         try:
             fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            create_terminal_run(job_id, "skipped_overlap", command_display, "Previous run still active", source)
-            return 0
+            run_id = create_terminal_run(
+                job_id,
+                "skipped_overlap",
+                command_display,
+                "Previous run still active",
+                source,
+                group_run_id,
+            )
+            return JobExecutionResult(run_id, "skipped_overlap", 0, "Previous run still active")
 
     run_id = new_run_id(job_id)
     started_at = db.utc_now()
@@ -243,6 +261,7 @@ def run_job(job_id: str, source: str = "auto") -> int:
         {
             "id": run_id,
             "job_id": job_id,
+            "group_run_id": group_run_id,
             "source": source,
             "started_at": started_at,
             "status": "running",
@@ -341,13 +360,190 @@ def run_job(job_id: str, source: str = "auto") -> int:
             lock_handle.close()
         retention.cleanup_old_logs()
 
-    return 0 if status in {"success", "skipped_overlap", "disabled"} else 1
+    exit_status = 0 if status in {"success", "skipped_overlap", "disabled"} else 1
+    return JobExecutionResult(run_id, status, exit_status, error_summary)
+
+
+def run_job(job_id: str, source: str = "auto") -> int:
+    db.init_db()
+    retention.cleanup_old_logs()
+    job = db.get_job(job_id)
+    if job is None:
+        return 1
+
+    result = execute_job(job, source=source, apply_job_schedule_guards=True)
+    return result.exit_code
+
+
+def new_group_run_id(group_id: str) -> str:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return f"{stamp}-{uuid.uuid4().hex[:8]}-{group_id}"
+
+
+def create_terminal_group_run(
+    group_id: str,
+    status: str,
+    error_summary: str | None = None,
+    source: str = "auto",
+) -> str:
+    now = db.utc_now()
+    group_run_id = new_group_run_id(group_id)
+    db.insert_group_run(
+        {
+            "id": group_run_id,
+            "group_id": group_id,
+            "source": source,
+            "started_at": now,
+            "finished_at": now,
+            "status": status,
+            "duration_ms": 0,
+            "error_summary": error_summary,
+        }
+    )
+    return group_run_id
+
+
+def run_group(group_id: str, source: str = "auto") -> int:
+    db.init_db()
+    retention.cleanup_old_logs()
+    group = db.get_group_with_members(group_id)
+    if group is None:
+        return 1
+
+    manual = source == "manual"
+    if not manual and not int(group.get("enabled", 0)):
+        cron.write_cron_file()
+        return 0
+    if not manual and not work_window.is_within_window(group.get("work_start"), group.get("work_end")):
+        return 0
+
+    lock_handle = None
+    lock_path = config.LOCK_DIR / "groups" / f"{group_id}.lock"
+    if int(group.get("prevent_overlap", 1)):
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_handle = lock_path.open("w")
+        try:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            create_terminal_group_run(group_id, "skipped_overlap", "Previous group run still active", source)
+            return 0
+
+    group_run_id = new_group_run_id(group_id)
+    started_at = db.utc_now()
+    started_monotonic = time.monotonic()
+    db.insert_group_run(
+        {
+            "id": group_run_id,
+            "group_id": group_id,
+            "source": source,
+            "started_at": started_at,
+            "status": "running",
+        }
+    )
+
+    status = "success"
+    error_summary = None
+    exit_code = 0
+
+    try:
+        for member in group["members"]:
+            step_id = f"{group_run_id}-{member['position']}"
+            step_started = db.utc_now()
+            db.insert_group_run_step(
+                {
+                    "id": step_id,
+                    "group_run_id": group_run_id,
+                    "group_id": group_id,
+                    "job_id": member["job_id"],
+                    "position": member["position"],
+                    "status": "running",
+                    "started_at": step_started,
+                }
+            )
+            job = db.get_job(member["job_id"])
+            if job is None:
+                step_error = "Group member job is no longer active"
+                db.update_group_run_step(
+                    step_id,
+                    {"status": "failed", "finished_at": db.utc_now(), "error_summary": step_error},
+                )
+                status = "failed"
+                error_summary = f"Step {member['position']} failed: {step_error}"
+                exit_code = 1
+                break
+
+            result = execute_job(
+                job,
+                source=source,
+                apply_job_schedule_guards=False,
+                group_run_id=group_run_id,
+            )
+            db.update_group_run_step(
+                step_id,
+                {
+                    "run_id": result.run_id,
+                    "status": result.status,
+                    "finished_at": db.utc_now(),
+                    "error_summary": result.error_summary,
+                },
+            )
+            if result.status != "success":
+                status = "timeout" if result.status == "timeout" else "failed"
+                error_summary = (
+                    f"Step {member['position']} {job['name']} ended with {result.status}"
+                )
+                if result.error_summary:
+                    error_summary = f"{error_summary}: {result.error_summary}"
+                exit_code = 1
+                break
+
+        if status != "success":
+            completed_positions = {
+                step["position"]
+                for step in db.get_group_run_with_steps(group_run_id)["steps"]
+            }
+            for member in group["members"]:
+                if member["position"] in completed_positions:
+                    continue
+                db.insert_group_run_step(
+                    {
+                        "id": f"{group_run_id}-{member['position']}",
+                        "group_run_id": group_run_id,
+                        "group_id": group_id,
+                        "job_id": member["job_id"],
+                        "position": member["position"],
+                        "status": "skipped",
+                        "error_summary": "Previous step failed",
+                    }
+                )
+    finally:
+        finished_at = db.utc_now()
+        duration_ms = int((time.monotonic() - started_monotonic) * 1000)
+        db.update_group_run(
+            group_run_id,
+            {
+                "finished_at": finished_at,
+                "status": status,
+                "duration_ms": duration_ms,
+                "error_summary": error_summary,
+            },
+        )
+        if lock_handle is not None:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+            lock_handle.close()
+        retention.cleanup_old_logs()
+
+    return exit_code
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run a pi-scheduler job by id")
-    parser.add_argument("--job-id", required=True)
+    parser = argparse.ArgumentParser(description="Run a pi-scheduler job or group by id")
+    target = parser.add_mutually_exclusive_group(required=True)
+    target.add_argument("--job-id")
+    target.add_argument("--group-id")
     args = parser.parse_args()
+    if args.group_id:
+        return run_group(args.group_id)
     return run_job(args.job_id)
 
 
