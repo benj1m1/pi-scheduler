@@ -7,11 +7,13 @@
     <span class="badge {{ 'ok' if job.enabled else 'muted' }}">{{ 'enabled' if job.enabled else 'disabled' }}</span>
   </div>
   <dl class="wide">
+    {% set prompt_collapsible = job.task_prompt|length > 320 %}
+    {% set command_collapsible = command|length > 260 %}
     <dt>Prompt</dt>
     <dd>
-      <div class="collapsible-field" data-collapsible>
-        <div id="prompt-preview" class="collapsible-text">{{ job.task_prompt }}</div>
-        <button class="inline-toggle collapsible-toggle" type="button" aria-expanded="false" aria-controls="prompt-preview" hidden>Show more</button>
+      <div class="collapsible-field" {% if prompt_collapsible %}data-collapsible{% endif %}>
+        <div id="prompt-preview" class="collapsible-text {{ 'is-collapsible' if prompt_collapsible else 'expanded' }}">{{ job.task_prompt }}</div>
+        {% if prompt_collapsible %}<button class="inline-toggle collapsible-toggle" type="button" aria-expanded="false" aria-controls="prompt-preview">Show more</button>{% endif %}
       </div>
     </dd>
     <dt>Model</dt><dd>{{ job.provider_name ~ '/' ~ job.model_id if job.provider_name and job.model_id else 'Pi default' }}</dd>
@@ -23,9 +25,9 @@
     <dt>Cron</dt><dd><code>{{ job.cron_expr }}</code></dd>
     <dt>Command</dt>
     <dd>
-      <div class="collapsible-field" data-collapsible>
-        <div id="command-preview" class="collapsible-text command-preview"><code>{{ command }}</code></div>
-        <button class="inline-toggle collapsible-toggle" type="button" aria-expanded="false" aria-controls="command-preview" hidden>Show more</button>
+      <div class="collapsible-field" {% if command_collapsible %}data-collapsible{% endif %}>
+        <div id="command-preview" class="collapsible-text command-preview {{ 'is-collapsible' if command_collapsible else 'expanded' }}"><code>{{ command }}</code></div>
+        {% if command_collapsible %}<button class="inline-toggle collapsible-toggle" type="button" aria-expanded="false" aria-controls="command-preview">Show more</button>{% endif %}
       </div>
     </dd>
     {% if command_error %}<dt>Command error</dt><dd><span class="bad-text">{{ command_error }}</span></dd>{% endif %}
@@ -71,35 +73,16 @@
   </div>
 </section>
 <script>
-  function setupCollapsibleFields() {
-    document.querySelectorAll("[data-collapsible]").forEach((field) => {
-      const content = field.querySelector(".collapsible-text");
-      const toggle = field.querySelector(".collapsible-toggle");
-      if (!content || !toggle) return;
+  document.querySelectorAll("[data-collapsible]").forEach((field) => {
+    const content = field.querySelector(".collapsible-text");
+    const toggle = field.querySelector(".collapsible-toggle");
+    if (!content || !toggle) return;
 
-      const lineHeight = Number.parseFloat(window.getComputedStyle(content).lineHeight);
-      const collapsedHeight = Number.isFinite(lineHeight) ? lineHeight * 5 : content.clientHeight;
-      content.classList.add("expanded");
-      const naturalHeight = content.scrollHeight;
-      content.classList.remove("expanded");
-
-      if (naturalHeight <= collapsedHeight + 1) {
-        toggle.hidden = true;
-        content.classList.add("expanded");
-        return;
-      }
-
-      toggle.hidden = false;
-      toggle.addEventListener("click", () => {
-        const expanded = content.classList.toggle("expanded");
-        toggle.setAttribute("aria-expanded", String(expanded));
-        toggle.textContent = expanded ? "Show less" : "Show more";
-      });
+    toggle.addEventListener("click", () => {
+      const expanded = content.classList.toggle("expanded");
+      toggle.setAttribute("aria-expanded", String(expanded));
+      toggle.textContent = expanded ? "Show less" : "Show more";
     });
-  }
-
-  window.addEventListener("load", () => {
-    window.requestAnimationFrame(setupCollapsibleFields);
   });
 
   const recentRuns = document.getElementById("recent-runs");

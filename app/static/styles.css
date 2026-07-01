@@ -99,12 +99,14 @@ pre { overflow: auto; padding: 1rem; white-space: pre-wrap; }
 .collapsible-text {
   --collapsible-line-height: 1.45em;
   line-height: var(--collapsible-line-height);
-  max-height: calc(var(--collapsible-line-height) * 5);
-  overflow: hidden;
   position: relative;
   white-space: pre-wrap;
 }
-.collapsible-text::after {
+.collapsible-text.is-collapsible {
+  max-height: calc(var(--collapsible-line-height) * 5);
+  overflow: hidden;
+}
+.collapsible-text.is-collapsible::after {
   background: linear-gradient(rgb(255 250 241 / 0), #fffaf1 78%);
   bottom: 0;
   content: "";
@@ -114,7 +116,7 @@ pre { overflow: auto; padding: 1rem; white-space: pre-wrap; }
   position: absolute;
   right: 0;
 }
-.collapsible-text.expanded { max-height: none; }
+.collapsible-text.expanded { max-height: none; overflow: visible; }
 .collapsible-text.expanded::after { display: none; }
 .command-preview {
   background: #25211d;
@@ -123,7 +125,7 @@ pre { overflow: auto; padding: 1rem; white-space: pre-wrap; }
   overflow-wrap: anywhere;
   padding: 0.75rem;
 }
-.command-preview::after { background: linear-gradient(rgb(37 33 29 / 0), #25211d 78%); }
+.command-preview.is-collapsible::after { background: linear-gradient(rgb(37 33 29 / 0), #25211d 78%); }
 .command-preview code { background: transparent; color: inherit; padding: 0; }
 .inline-toggle {
   align-items: center;

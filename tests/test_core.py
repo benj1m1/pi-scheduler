@@ -1144,11 +1144,39 @@ def test_job_detail_shows_only_recent_runs_with_logs_link(tmp_path, monkeypatch)
     assert len(response.context["runs"]) == web.RUNS_PER_PAGE
     assert response.context["runs"][0]["id"] == "run-11"
     assert f'href="/logs?job_id={job_id}"' in html
-    assert 'id="prompt-preview" class="collapsible-text"' in html
-    assert 'id="command-preview" class="collapsible-text command-preview"' in html
-    assert 'class="inline-toggle collapsible-toggle"' in html
+    assert 'id="prompt-preview" class="collapsible-text expanded"' in html
+    assert 'aria-controls="prompt-preview"' not in html
+    assert 'id="command-preview" class="collapsible-text command-preview' in html
     assert 'id="previous-page"' not in html
     assert 'id="next-page"' not in html
+
+
+def test_job_detail_collapses_long_prompt(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "review-agent",
+            "skill_name": "general",
+            "task_prompt": "Review this repository carefully. " * 20,
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+        }
+    )
+
+    request = Request({"type": "http", "method": "GET", "path": f"/jobs/{job_id}", "headers": []})
+    response = web.job_detail(request, job_id)
+    html = web.templates.env.get_template("job_detail.html").render(response.context)
+
+    assert 'id="prompt-preview" class="collapsible-text is-collapsible"' in html
+    assert 'aria-controls="prompt-preview"' in html
+    assert "Show more" in html
 
 
 def test_logs_page_lists_runs_with_filters_and_cleanup_controls(tmp_path, monkeypatch):
