@@ -162,6 +162,34 @@ def test_db_creates_ordered_job_groups_and_blocks_member_delete(tmp_path, monkey
         raise AssertionError("Expected referenced job delete rejection")
 
 
+def test_group_form_starts_without_empty_member_slots(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    db.init_db()
+    request = Request({"type": "http", "method": "GET", "path": "/groups/new", "headers": []})
+    context = web.group_form_context(
+        request,
+        {
+            "name": "",
+            "schedule_every": "5",
+            "schedule_unit": "minutes",
+            "work_start": "",
+            "work_end": "",
+            "enabled": 1,
+            "member_job_ids": [],
+        },
+        [],
+        "/groups",
+        "New Job Group",
+    )
+
+    assert context["member_job_ids"] == []
+    assert "member_slots" not in context
+
+
 def test_db_init_creates_performance_indexes(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
     monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")

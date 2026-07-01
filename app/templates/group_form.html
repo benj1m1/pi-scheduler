@@ -18,19 +18,46 @@
     <label>Name <input name="name" value="{{ group.name }}" required></label>
     <fieldset>
       <legend>Members</legend>
-      <p class="hint">Pick each step in execution order. Blank steps are ignored; the same job can only appear once.</p>
-      <div class="member-slots">
-        {% for selected_job_id in member_slots %}
-        <label>Step {{ loop.index }}
-          <select name="member_job_ids">
-            <option value="">No job</option>
-            {% for job in jobs %}
-            <option value="{{ job.id }}" {% if selected_job_id == job.id %}selected{% endif %}>{{ job.name }}</option>
-            {% endfor %}
-          </select>
-        </label>
+      <p class="hint">Add one job per step, then drag rows to set execution order. The same job can only appear once.</p>
+      <div id="member-list" class="member-list" aria-live="polite">
+        {% for selected_job_id in member_job_ids %}
+        <div class="member-row" data-member-row>
+          <button class="drag-handle" type="button" draggable="true" aria-label="Drag step {{ loop.index }}">↕</button>
+          <label><span class="member-step-label">Step {{ loop.index }}</span>
+            <select name="member_job_ids" required>
+              <option value="">Choose job</option>
+              {% for job in jobs %}
+              <option value="{{ job.id }}" {% if selected_job_id == job.id %}selected{% endif %}>{{ job.name }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <div class="member-row-actions">
+            <button type="button" class="button-compact" data-move-up>Up</button>
+            <button type="button" class="button-compact" data-move-down>Down</button>
+            <button type="button" class="button-compact danger-light" data-remove-member>Remove</button>
+          </div>
+        </div>
         {% endfor %}
       </div>
+      <button type="button" class="button add-member-button" id="add-member">+ Add member</button>
+      <template id="member-row-template">
+        <div class="member-row" data-member-row>
+          <button class="drag-handle" type="button" draggable="true" aria-label="Drag step">↕</button>
+          <label><span class="member-step-label">Step</span>
+            <select name="member_job_ids" required>
+              <option value="">Choose job</option>
+              {% for job in jobs %}
+              <option value="{{ job.id }}">{{ job.name }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <div class="member-row-actions">
+            <button type="button" class="button-compact" data-move-up>Up</button>
+            <button type="button" class="button-compact" data-move-down>Down</button>
+            <button type="button" class="button-compact danger-light" data-remove-member>Remove</button>
+          </div>
+        </div>
+      </template>
     </fieldset>
     <fieldset>
       <legend>Schedule</legend>
@@ -77,6 +104,85 @@
   </form>
 </section>
 <script>
+  (() => {
+    const list = document.getElementById("member-list");
+    const template = document.getElementById("member-row-template");
+    const addButton = document.getElementById("add-member");
+    if (!list || !template || !addButton) return;
+
+    let draggedRow = null;
+
+    const rows = () => Array.from(list.querySelectorAll("[data-member-row]"));
+
+    const refreshSteps = () => {
+      rows().forEach((row, index) => {
+        const stepNumber = index + 1;
+        const label = row.querySelector(".member-step-label");
+        const handle = row.querySelector(".drag-handle");
+        const moveUp = row.querySelector("[data-move-up]");
+        const moveDown = row.querySelector("[data-move-down]");
+        if (label) label.textContent = `Step ${stepNumber}`;
+        if (handle) handle.setAttribute("aria-label", `Drag step ${stepNumber}`);
+        if (moveUp) moveUp.disabled = index === 0;
+        if (moveDown) moveDown.disabled = index === rows().length - 1;
+      });
+    };
+
+    const addRow = () => {
+      list.appendChild(template.content.firstElementChild.cloneNode(true));
+      refreshSteps();
+    };
+
+    const rowFromEvent = (event) => event.target.closest("[data-member-row]");
+
+    addButton.addEventListener("click", addRow);
+
+    list.addEventListener("click", (event) => {
+      const row = rowFromEvent(event);
+      if (!row) return;
+      if (event.target.closest("[data-remove-member]")) {
+        row.remove();
+        refreshSteps();
+        return;
+      }
+      if (event.target.closest("[data-move-up]") && row.previousElementSibling) {
+        list.insertBefore(row, row.previousElementSibling);
+        refreshSteps();
+        return;
+      }
+      if (event.target.closest("[data-move-down]") && row.nextElementSibling) {
+        list.insertBefore(row.nextElementSibling, row);
+        refreshSteps();
+      }
+    });
+
+    list.addEventListener("dragstart", (event) => {
+      const row = rowFromEvent(event);
+      if (!row) return;
+      draggedRow = row;
+      row.classList.add("is-dragging");
+      event.dataTransfer.effectAllowed = "move";
+    });
+
+    list.addEventListener("dragover", (event) => {
+      if (!draggedRow) return;
+      event.preventDefault();
+      const target = rowFromEvent(event);
+      if (!target || target === draggedRow) return;
+      const rect = target.getBoundingClientRect();
+      const shouldInsertAfter = event.clientY > rect.top + rect.height / 2;
+      list.insertBefore(draggedRow, shouldInsertAfter ? target.nextSibling : target);
+    });
+
+    list.addEventListener("dragend", () => {
+      if (draggedRow) draggedRow.classList.remove("is-dragging");
+      draggedRow = null;
+      refreshSteps();
+    });
+
+    refreshSteps();
+  })();
+
   (() => {
     const start = document.getElementById("work-start");
     const end = document.getElementById("work-end");

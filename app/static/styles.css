@@ -254,7 +254,31 @@ p { line-height: 1.55; }
 }
 .group-chain-large { margin-bottom: 0; }
 .group-chain-large li { border-radius: var(--radius-sm); }
-.member-slots { display: grid; gap: var(--space-3); grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-top: var(--space-3); }
+.member-list { display: grid; gap: var(--space-3); margin-top: var(--space-3); }
+.member-row {
+  align-items: center;
+  background: var(--surface-warm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  padding: var(--space-3);
+}
+.member-row.is-dragging { opacity: 0.55; }
+.member-row label { margin: 0; }
+.member-step-label { display: block; margin-bottom: 0.35rem; }
+.drag-handle {
+  border-radius: 999px;
+  cursor: grab;
+  font-size: 1rem;
+  min-height: 2.4rem;
+  padding: 0.35rem 0.7rem;
+}
+.drag-handle:active { cursor: grabbing; }
+.member-row-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); justify-content: flex-end; }
+.danger-light { color: #9f2f24; }
+.add-member-button { margin-top: var(--space-3); }
 
 dl { display: grid; gap: 0.45rem 0.9rem; grid-template-columns: 6.5rem 1fr; margin: 0; }
 .wide { grid-template-columns: 8.5rem 1fr; }
@@ -565,6 +589,10 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   .log-box { max-height: 60vh; }
   .cleanup-grid, .filter-grid { grid-template-columns: 1fr; }
   .inline-fields { grid-template-columns: 1fr; }
+  .member-row { grid-template-columns: 1fr; }
+  .drag-handle { justify-self: flex-start; }
+  .member-row-actions { justify-content: stretch; }
+  .member-row-actions button { flex: 1 1 7rem; }
   dl, .wide { grid-template-columns: 1fr; }
   .job-card .card-head, .job-card .card-head h2, .job-card .prompt-preview { min-height: 0; }
   dt { margin-top: 0.5rem; }

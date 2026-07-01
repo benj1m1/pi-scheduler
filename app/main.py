@@ -404,8 +404,6 @@ def with_group_schedule(group: dict) -> dict:
 
 def group_form_context(request: Request, group: dict, errors: list[str], action: str, title: str) -> dict:
     member_job_ids = list(group.get("member_job_ids", []))
-    slot_count = max(8, len(member_job_ids) + 2)
-    member_slots = member_job_ids + [""] * (slot_count - len(member_job_ids))
     return {
         "request": request,
         "group": group,
@@ -413,7 +411,7 @@ def group_form_context(request: Request, group: dict, errors: list[str], action:
         "action": action,
         "title": title,
         "jobs": db.list_jobs(),
-        "member_slots": member_slots,
+        "member_job_ids": member_job_ids,
         "hour_options": hour_options(),
     }
 
