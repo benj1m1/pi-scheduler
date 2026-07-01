@@ -1372,9 +1372,51 @@ def test_run_detail_marks_whether_jsonl_is_available(tmp_path, monkeypatch):
     request = Request({"type": "http", "method": "GET", "path": "/runs/summary-run", "headers": []})
     summary_response = web.run_detail(request, "summary-run")
     events_response = web.run_detail(request, "events-run")
+    summary_html = web.templates.env.get_template("run_detail.html").render(summary_response.context)
 
     assert summary_response.context["has_jsonl"] is False
     assert events_response.context["has_jsonl"] is True
+    assert 'id="command-preview" class="collapsible-text command-preview expanded"' in summary_html
+    assert 'aria-controls="command-preview"' not in summary_html
+
+
+def test_run_detail_collapses_long_command(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "pi-agent",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+        }
+    )
+    db.insert_run(
+        {
+            "id": "long-command-run",
+            "job_id": job_id,
+            "started_at": "2026-06-27T14:55:01Z",
+            "finished_at": "2026-06-27T14:55:19Z",
+            "status": "success",
+            "duration_ms": 18000,
+            "command": "pi -p " + "review logs " * 40,
+        }
+    )
+
+    request = Request({"type": "http", "method": "GET", "path": "/runs/long-command-run", "headers": []})
+    response = web.run_detail(request, "long-command-run")
+    html = web.templates.env.get_template("run_detail.html").render(response.context)
+
+    assert 'id="command-preview" class="collapsible-text command-preview is-collapsible"' in html
+    assert 'aria-controls="command-preview"' in html
+    assert "Show more" in html
 
 
 def test_run_detail_displays_current_job_name_after_rename(tmp_path, monkeypatch):

@@ -10,6 +10,7 @@
     <span class="badge {{ 'ok' if run.status == 'success' else 'bad' if run.status in ['failed', 'timeout'] else 'muted' }}">{{ run.status }}</span>
   </div>
   <dl class="wide">
+    {% set command_collapsible = run.command|length > 260 %}
     <dt>Job</dt><dd><a href="/jobs/{{ run.job_id }}">{{ job.name if job else run.job_id }}</a></dd>
     <dt>Source</dt><dd>{{ 'manual' if run.source == 'manual' else 'auto' }}</dd>
     <dt>Status</dt><dd><span class="badge {{ 'ok' if run.status == 'success' else 'bad' if run.status in ['failed', 'timeout'] else 'muted' }}">{{ run.status }}</span></dd>
@@ -17,7 +18,13 @@
     <dt>Finished</dt><dd>{{ run.finished_at|beijing_time }}</dd>
     <dt>Duration</dt><dd>{{ run.duration_ms|seconds_duration }} s</dd>
     <dt>Exit code</dt><dd>{{ run.exit_code if run.exit_code is not none else '' }}</dd>
-    <dt>Command</dt><dd><code>{{ run.command }}</code></dd>
+    <dt>Command</dt>
+    <dd>
+      <div class="collapsible-field" {% if command_collapsible %}data-collapsible{% endif %}>
+        <div id="command-preview" class="collapsible-text command-preview {{ 'is-collapsible' if command_collapsible else 'expanded' }}"><code>{{ run.command }}</code></div>
+        {% if command_collapsible %}<button class="inline-toggle collapsible-toggle" type="button" aria-expanded="false" aria-controls="command-preview">Show more</button>{% endif %}
+      </div>
+    </dd>
     <dt>Error</dt><dd>{{ run.error_summary or '' }}</dd>
   </dl>
 </section>
@@ -46,6 +53,18 @@
 </section>
 {% endif %}
 <script>
+  document.querySelectorAll("[data-collapsible]").forEach((field) => {
+    const content = field.querySelector(".collapsible-text");
+    const toggle = field.querySelector(".collapsible-toggle");
+    if (!content || !toggle) return;
+
+    toggle.addEventListener("click", () => {
+      const expanded = content.classList.toggle("expanded");
+      toggle.setAttribute("aria-expanded", String(expanded));
+      toggle.textContent = expanded ? "Show less" : "Show more";
+    });
+  });
+
   document.querySelectorAll(".copy-log").forEach((button) => {
     button.addEventListener("click", async () => {
       const target = document.getElementById(button.dataset.copyTarget);
