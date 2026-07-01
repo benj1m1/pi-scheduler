@@ -1,6 +1,6 @@
 # Pi Scheduler
 
-Personal web panel for managing cron-driven Pi prompt runs on a Linux server.
+Pi Scheduler is an execution platform for scheduled Pi agents, providing scheduling, runtime configuration, logging, auditing, and execution management.
 
 ## What It Does
 
