@@ -54,6 +54,7 @@
     </tbody>
   </table>
   <p id="recent-runs-empty" {% if runs %}hidden{% endif %}>{{ 'No runs on this page.' if page > 1 else 'No runs yet.' }}</p>
+  <p id="recent-runs-status" class="hint" aria-live="polite" hidden></p>
   <div id="recent-runs-pagination" class="pagination">
     <button id="previous-page" class="button" type="button" {% if page <= 1 %}disabled{% endif %}>Previous</button>
     <label class="page-control" for="page-input">Page <input id="page-input" class="page-input" type="number" min="1" value="{{ page }}" inputmode="numeric"></label>
@@ -68,6 +69,7 @@
   const runsTable = document.getElementById("recent-runs-table");
   const runsBody = document.getElementById("recent-runs-body");
   const runsEmpty = document.getElementById("recent-runs-empty");
+  const runsStatus = document.getElementById("recent-runs-status");
   const sourceTabs = Array.from(document.querySelectorAll(".run-source-tab"));
   const previousPage = document.getElementById("previous-page");
   const nextPage = document.getElementById("next-page");
@@ -77,12 +79,40 @@
     page: Number(recentRuns.dataset.page),
     source: recentRuns.dataset.source,
     hasNextPage: !nextPage.disabled,
+    isRunning: recentRuns.dataset.initialRunning === "true",
+    isBusy: false,
   };
   const queuedAt = recentRuns.dataset.initialRunning === "true" ? Date.now() : 0;
+  const pollIntervalMs = 2000;
+  const maxPollIntervalMs = 30000;
+  let pollTimer = null;
+  let activeRequest = null;
+  let latestRequestId = 0;
+  let consecutiveFailures = 0;
 
   function setRunning(isRunning) {
+    state.isRunning = isRunning;
     runNowButton.disabled = isRunning;
     runNowButton.textContent = isRunning ? "Running" : "Run Now";
+  }
+
+  function queuedRecently() {
+    return queuedAt > 0 && Date.now() - queuedAt < 3000;
+  }
+
+  function setStatus(message) {
+    runsStatus.textContent = message;
+    runsStatus.hidden = !message;
+  }
+
+  function setBusy(isBusy, message = "") {
+    state.isBusy = isBusy;
+    renderPagination(state.hasNextPage);
+    pageInput.disabled = isBusy;
+    for (const tab of sourceTabs) {
+      tab.setAttribute("aria-disabled", isBusy ? "true" : "false");
+    }
+    setStatus(message);
   }
 
   function cell(text) {
@@ -128,8 +158,8 @@
 
   function renderPagination(hasNextPage) {
     state.hasNextPage = hasNextPage;
-    previousPage.disabled = state.page <= 1;
-    nextPage.disabled = !hasNextPage;
+    previousPage.disabled = state.isBusy || state.page <= 1;
+    nextPage.disabled = state.isBusy || !hasNextPage;
     if (document.activeElement !== pageInput) {
       pageInput.value = String(state.page);
     }
@@ -143,24 +173,84 @@
     }
   }
 
-  async function refreshRuns({ updateHistory = false, replaceHistory = false } = {}) {
+  function clearPollTimer() {
+    if (pollTimer !== null) {
+      window.clearTimeout(pollTimer);
+      pollTimer = null;
+    }
+  }
+
+  function shouldPoll() {
+    return state.isRunning || queuedRecently();
+  }
+
+  function scheduleNextPoll(delayMs) {
+    clearPollTimer();
+    if (document.hidden || !shouldPoll()) return;
+    pollTimer = window.setTimeout(() => {
+      refreshRuns({ reason: "poll" });
+    }, delayMs);
+  }
+
+  async function refreshRuns({ updateHistory = false, replaceHistory = false, reason = "manual" } = {}) {
     if (document.hidden) return;
+    if (reason === "poll" && activeRequest) return;
+    clearPollTimer();
+
+    if (activeRequest) {
+      activeRequest.abort();
+    }
+
+    const requestId = ++latestRequestId;
+    const controller = new AbortController();
+    activeRequest = controller;
+    const showBusy = reason !== "poll";
+    if (showBusy) {
+      setBusy(true, "Updating recent runs...");
+    }
+
     const params = new URLSearchParams({ source: state.source, page: String(state.page) });
-    const response = await fetch(`/jobs/${encodeURIComponent(jobId)}/runs/status?${params.toString()}`, {
-      credentials: "same-origin",
-      headers: { "Accept": "application/json" },
-    });
-    if (!response.ok) return;
-    const data = await response.json();
-    state.page = data.page;
-    const keepQueuedDisabled = queuedAt > 0 && Date.now() - queuedAt < 3000;
-    setRunning(data.has_running_run || keepQueuedDisabled);
-    renderRuns(data.runs);
-    renderPagination(data.has_next_page);
-    renderSourceTabs();
-    if (updateHistory) {
-      const method = replaceHistory ? "replaceState" : "pushState";
-      history[method]({ page: state.page, source: state.source }, "", jobUrl());
+    let statusAfterBusy = "";
+    try {
+      const response = await fetch(`/jobs/${encodeURIComponent(jobId)}/runs/status?${params.toString()}`, {
+        credentials: "same-origin",
+        headers: { "Accept": "application/json" },
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        throw new Error(`Request failed with status ${response.status}`);
+      }
+      const data = await response.json();
+      if (requestId !== latestRequestId) return;
+
+      consecutiveFailures = 0;
+      setStatus("");
+      state.page = data.page;
+      setRunning(data.has_running_run || queuedRecently());
+      renderRuns(data.runs);
+      renderPagination(data.has_next_page);
+      renderSourceTabs();
+      if (updateHistory) {
+        const method = replaceHistory ? "replaceState" : "pushState";
+        history[method]({ page: state.page, source: state.source }, "", jobUrl());
+      }
+      scheduleNextPoll(pollIntervalMs);
+    } catch (error) {
+      if (error.name === "AbortError") return;
+      consecutiveFailures += 1;
+      if (requestId === latestRequestId) {
+        statusAfterBusy = "Could not update recent runs. Retrying...";
+        setStatus(statusAfterBusy);
+      }
+      const retryDelay = Math.min(maxPollIntervalMs, pollIntervalMs * 2 ** consecutiveFailures);
+      scheduleNextPoll(retryDelay);
+    } finally {
+      if (activeRequest === controller) {
+        activeRequest = null;
+      }
+      if (showBusy && requestId === latestRequestId) {
+        setBusy(false, statusAfterBusy);
+      }
     }
   }
 
@@ -183,10 +273,14 @@
     refreshRuns({ updateHistory: true, replaceHistory: true });
   }
 
-  runNowForm.addEventListener("submit", () => setRunning(true));
+  runNowForm.addEventListener("submit", () => {
+    setRunning(true);
+    scheduleNextPoll(pollIntervalMs);
+  });
   for (const tab of sourceTabs) {
     tab.addEventListener("click", (event) => {
       event.preventDefault();
+      if (state.isBusy) return;
       state.source = tab.dataset.source;
       state.page = 1;
       refreshRuns({ updateHistory: true });
@@ -205,7 +299,14 @@
     pageInput.value = String(state.page);
   });
   window.addEventListener("popstate", applyUrlState);
-  setInterval(refreshRuns, 2000);
-  refreshRuns({ updateHistory: true, replaceHistory: true });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      clearPollTimer();
+      return;
+    }
+    refreshRuns({ reason: shouldPoll() ? "poll" : "manual" });
+  });
+  history.replaceState({ page: state.page, source: state.source }, "", jobUrl());
+  scheduleNextPoll(pollIntervalMs);
 </script>
 {% endblock %}
