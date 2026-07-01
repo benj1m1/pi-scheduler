@@ -7,14 +7,16 @@
     <link rel="stylesheet" href="/static/styles.css">
   </head>
   <body>
-    <header>
-      <a class="brand" href="/">Pi Scheduler</a>
-      <nav>
-        <a href="/jobs/new">New Job</a>
-        <a href="/logs">Logs</a>
-        <a href="/cron">Cron Preview</a>
+    {% set current_path = request.url.path if request is defined else '' %}
+    <a class="skip-link" href="#content">Skip to content</a>
+    <header class="app-header">
+      <a class="brand" href="/" {% if current_path == '/' %}aria-current="page"{% endif %}>Pi Scheduler</a>
+      <nav aria-label="Primary">
+        <a href="/jobs/new" {% if current_path == '/jobs/new' %}aria-current="page"{% endif %}>New Job</a>
+        <a href="/logs" {% if current_path.startswith('/logs') or current_path.startswith('/runs/') %}aria-current="page"{% endif %}>Logs</a>
+        <a href="/cron" {% if current_path == '/cron' %}aria-current="page"{% endif %}>Cron Preview</a>
       </nav>
     </header>
-    <main>{% block content %}{% endblock %}</main>
+    <main id="content">{% block content %}{% endblock %}</main>
   </body>
 </html>

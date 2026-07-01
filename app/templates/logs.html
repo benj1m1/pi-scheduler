@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Logs - Pi Scheduler{% endblock %}
 {% block content %}
-<section class="hero logs-hero">
+<section class="hero page-hero logs-hero">
   <div>
     <p class="eyebrow">Run history</p>
     <h1>Logs</h1>
@@ -14,7 +14,7 @@
 </section>
 
 {% if errors %}
-<div class="errors">
+<div class="errors" role="alert">
   {% for error in errors %}<div>{{ error }}</div>{% endfor %}
 </div>
 {% endif %}
@@ -95,9 +95,10 @@
   </div>
   {% if runs %}
   <div class="table-wrap">
-    <table class="logs-table">
+    <table class="data-table logs-table">
+      <caption class="sr-only">Filtered job run results</caption>
       <thead>
-        <tr><th>Started</th><th>Job</th><th>Source</th><th>Status</th><th>Duration</th><th>Logs</th><th></th></tr>
+        <tr><th scope="col">Started</th><th scope="col">Job</th><th scope="col">Source</th><th scope="col">Status</th><th scope="col">Duration</th><th scope="col">Logs</th><th scope="col"><span class="sr-only">Actions</span></th></tr>
       </thead>
       <tbody>
         {% for run in runs %}
@@ -121,7 +122,7 @@
               {% if not run.stdout_path and not run.stderr_path and not run.jsonl_path %}<span class="muted-text">none</span>{% endif %}
             </span>
           </td>
-          <td><a class="button" href="/runs/{{ run.id }}">View</a></td>
+          <td><a class="button button-compact" href="/runs/{{ run.id }}">View</a></td>
         </tr>
         {% endfor %}
       </tbody>

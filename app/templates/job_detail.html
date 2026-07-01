@@ -1,9 +1,12 @@
 {% extends "base.html" %}
 {% block title %}{{ job.name }} - Pi Scheduler{% endblock %}
 {% block content %}
-<section class="panel">
+<section class="panel page-panel">
   <div class="card-head">
-    <h1>{{ job.name }}</h1>
+    <div>
+      <p class="eyebrow">Job detail</p>
+      <h1>{{ job.name }}</h1>
+    </div>
     <span class="badge {{ 'ok' if job.enabled else 'muted' }}">{{ 'enabled' if job.enabled else 'disabled' }}</span>
   </div>
   <dl class="wide">
@@ -53,8 +56,10 @@
     <a class="button" href="/logs?job_id={{ job.id }}">More logs</a>
   </div>
   <div id="recent-runs" data-job-id="{{ job.id }}" data-initial-running="{{ 'true' if has_running_run else 'false' }}">
-  <table id="recent-runs-table" {% if not runs %}hidden{% endif %}>
-    <thead><tr><th>Started</th><th>Source</th><th>Status</th><th>Duration</th><th>Exit</th><th></th></tr></thead>
+  <div id="recent-runs-table-wrap" class="table-wrap" {% if not runs %}hidden{% endif %}>
+  <table id="recent-runs-table" class="data-table" {% if not runs %}hidden{% endif %}>
+    <caption class="sr-only">Recent runs for {{ job.name }}</caption>
+    <thead><tr><th scope="col">Started</th><th scope="col">Source</th><th scope="col">Status</th><th scope="col">Duration</th><th scope="col">Exit</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
     <tbody id="recent-runs-body">
       {% for run in runs %}
       <tr>
@@ -63,11 +68,12 @@
         <td><span class="badge {{ 'ok' if run.status == 'success' else 'bad' if run.status in ['failed', 'timeout'] else 'muted' }}">{{ run.status }}</span></td>
         <td>{{ run.duration_ms|seconds_duration }} s</td>
         <td>{{ run.exit_code if run.exit_code is not none else '' }}</td>
-        <td><a href="/runs/{{ run.id }}">View</a></td>
+        <td><a class="button button-compact" href="/runs/{{ run.id }}">View</a></td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
+  </div>
   <p id="recent-runs-empty" {% if runs %}hidden{% endif %}>No runs yet.</p>
   <p id="recent-runs-status" class="hint" aria-live="polite" hidden></p>
   </div>
@@ -91,6 +97,7 @@
   const recentRuns = document.getElementById("recent-runs");
   const runNowForm = document.getElementById("run-now-form");
   const runNowButton = document.getElementById("run-now-button");
+  const runsTableWrap = document.getElementById("recent-runs-table-wrap");
   const runsTable = document.getElementById("recent-runs-table");
   const runsBody = document.getElementById("recent-runs-body");
   const runsEmpty = document.getElementById("recent-runs-empty");
@@ -154,11 +161,13 @@
       const viewCell = document.createElement("td");
       const link = document.createElement("a");
       link.href = run.url;
+      link.className = "button button-compact";
       link.textContent = "View";
       viewCell.appendChild(link);
       row.appendChild(viewCell);
       runsBody.appendChild(row);
     }
+    runsTableWrap.hidden = runs.length === 0;
     runsTable.hidden = runs.length === 0;
     runsEmpty.hidden = runs.length > 0;
     runsEmpty.textContent = "No runs yet.";

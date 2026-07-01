@@ -2,9 +2,15 @@
 {% block title %}{{ title }} - Pi Scheduler{% endblock %}
 {% block content %}
 <section class="panel">
-  <h1>{{ title }}</h1>
+  <div class="section-head">
+    <div>
+      <p class="eyebrow">Job configuration</p>
+      <h1>{{ title }}</h1>
+      <p class="hint">Define the prompt, model, schedule, and run safety settings.</p>
+    </div>
+  </div>
   {% if errors %}
-  <div class="errors">
+  <div class="errors" role="alert">
     {% for error in errors %}<p>{{ error }}</p>{% endfor %}
   </div>
   {% endif %}

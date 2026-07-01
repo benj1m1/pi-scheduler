@@ -1,9 +1,16 @@
 {% extends "base.html" %}
 {% block title %}Jobs - Pi Scheduler{% endblock %}
 {% block content %}
-<section class="hero">
-  <h1>Scheduled Pi Tasks</h1>
-  <p>Manage app-owned cron jobs that run Pi prompts and write structured logs.</p>
+<section class="hero page-hero">
+  <div>
+    <p class="eyebrow">Operations dashboard</p>
+    <h1>Scheduled Pi Tasks</h1>
+    <p>Manage app-owned cron jobs that run Pi prompts, prevent overlapping executions, and write structured logs.</p>
+  </div>
+  <div class="hero-stat">
+    <strong>{{ jobs|length }}</strong>
+    <span>{{ 'job' if jobs|length == 1 else 'jobs' }}</span>
+  </div>
 </section>
 
 {% if jobs %}
@@ -34,8 +41,9 @@
   {% endfor %}
 </div>
 {% else %}
-<div class="empty">
-  <p>No jobs yet.</p>
+<div class="empty empty-state">
+  <h2>No jobs yet</h2>
+  <p class="hint">Create a scheduled prompt to start collecting run history.</p>
   <a class="button primary" href="/jobs/new">Create the first job</a>
 </div>
 {% endif %}

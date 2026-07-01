@@ -1,12 +1,18 @@
 {% extends "base.html" %}
 {% block title %}Run {{ run.id }} - Pi Scheduler{% endblock %}
 {% block content %}
-<section class="panel">
-  <h1>Run {{ run.id }}</h1>
+<section class="panel page-panel">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Run detail</p>
+      <h1>Run {{ run.id }}</h1>
+    </div>
+    <span class="badge {{ 'ok' if run.status == 'success' else 'bad' if run.status in ['failed', 'timeout'] else 'muted' }}">{{ run.status }}</span>
+  </div>
   <dl class="wide">
     <dt>Job</dt><dd><a href="/jobs/{{ run.job_id }}">{{ job.name if job else run.job_id }}</a></dd>
     <dt>Source</dt><dd>{{ 'manual' if run.source == 'manual' else 'auto' }}</dd>
-    <dt>Status</dt><dd>{{ run.status }}</dd>
+    <dt>Status</dt><dd><span class="badge {{ 'ok' if run.status == 'success' else 'bad' if run.status in ['failed', 'timeout'] else 'muted' }}">{{ run.status }}</span></dd>
     <dt>Started</dt><dd>{{ run.started_at|beijing_time }}</dd>
     <dt>Finished</dt><dd>{{ run.finished_at|beijing_time }}</dd>
     <dt>Duration</dt><dd>{{ run.duration_ms|seconds_duration }} s</dd>
@@ -18,25 +24,25 @@
 <section class="panel">
   <div class="log-head">
     <h2>{{ 'stdout transcript' if has_jsonl else 'summary output' }}</h2>
-    <button type="button" class="copy-log" data-copy-target="stdout-log">Copy</button>
+    <button type="button" class="copy-log" data-copy-target="stdout-log" aria-label="Copy stdout log">Copy</button>
   </div>
-  <pre id="stdout-log" class="log-box">{{ stdout }}</pre>
+  <pre id="stdout-log" class="log-box" tabindex="0" aria-label="stdout log">{{ stdout }}</pre>
 </section>
 <section class="panel">
   <div class="log-head">
     <h2>stderr</h2>
-    <button type="button" class="copy-log" data-copy-target="stderr-log">Copy</button>
+    <button type="button" class="copy-log" data-copy-target="stderr-log" aria-label="Copy stderr log">Copy</button>
   </div>
-  <pre id="stderr-log" class="log-box">{{ stderr }}</pre>
+  <pre id="stderr-log" class="log-box" tabindex="0" aria-label="stderr log">{{ stderr }}</pre>
 </section>
 {% if has_jsonl %}
 <section class="panel">
   <div class="log-head">
     <h2>Pi event JSONL</h2>
-    <button type="button" class="copy-log" data-copy-target="jsonl-log">Copy</button>
+    <button type="button" class="copy-log" data-copy-target="jsonl-log" aria-label="Copy Pi event JSONL log">Copy</button>
   </div>
   <p class="hint">Raw Pi agent event stream captured from <code>pi --mode json</code>.</p>
-  <pre id="jsonl-log" class="log-box">{{ jsonl }}</pre>
+  <pre id="jsonl-log" class="log-box" tabindex="0" aria-label="Pi event JSONL log">{{ jsonl }}</pre>
 </section>
 {% endif %}
 <script>

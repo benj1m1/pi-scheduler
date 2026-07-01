@@ -1,10 +1,15 @@
 {% extends "base.html" %}
 {% block title %}Cron Preview - Pi Scheduler{% endblock %}
 {% block content %}
-<section class="panel">
-  <h1>Cron Preview</h1>
-  <p>Target file: <code>{{ cron_file }}</code></p>
-  {% if error %}<div class="errors"><p>{{ error }}</p></div>{% endif %}
-  <pre>{{ content }}</pre>
+<section class="panel page-panel">
+  <div class="section-head">
+    <div>
+      <p class="eyebrow">Generated schedule</p>
+      <h1>Cron Preview</h1>
+      <p class="hint">Target file: <code>{{ cron_file }}</code></p>
+    </div>
+  </div>
+  {% if error %}<div class="errors" role="alert"><p>{{ error }}</p></div>{% endif %}
+  <pre class="log-box" tabindex="0" aria-label="Generated cron file">{{ content }}</pre>
 </section>
 {% endblock %}
