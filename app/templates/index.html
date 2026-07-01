@@ -39,7 +39,15 @@
         <dt>Schedule</dt><dd>{{ group.cron_expr|describe_cron }}</dd>
         <dt>Work</dt><dd>{{ group.work_start|describe_work_window(group.work_end) }}</dd>
         <dt>Next check</dt><dd>{{ group.next_run|beijing_time or 'not scheduled' }}</dd>
-        <dt>Last</dt><dd>{{ group.last_status or 'never run' }} {{ group.last_finished_at|beijing_time }}</dd>
+        <dt>Last</dt>
+        <dd>
+          {% if group.last_status %}
+          <a href="{{ group.last_group_run_id|group_run_path(group.id) }}"><span class="badge {{ 'ok' if group.last_status == 'success' else 'bad' if group.last_status in ['failed', 'timeout'] else 'muted' }}">{{ group.last_status }}</span></a>
+          {{ group.last_duration_ms|seconds_duration }} s · {{ group.last_finished_at|beijing_time or group.last_started_at|beijing_time }}
+          {% else %}
+          never run
+          {% endif %}
+        </dd>
       </dl>
       <div class="actions">
         <a class="button" href="/groups/{{ group.id }}">Details</a>

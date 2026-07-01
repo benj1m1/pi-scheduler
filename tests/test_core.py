@@ -333,6 +333,39 @@ def test_db_migrates_existing_runs_for_group_context(tmp_path, monkeypatch):
     assert index is not None
 
 
+def test_db_migrates_existing_groups_for_failure_policy(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    with db.connect() as conn:
+        conn.executescript(
+            """
+            create table job_groups (
+              id text primary key,
+              name text not null,
+              cron_expr text not null,
+              enabled integer not null default 1,
+              prevent_overlap integer not null default 1,
+              work_start text,
+              work_end text,
+              created_at text not null,
+              updated_at text not null,
+              deleted_at text
+            );
+            insert into job_groups (
+              id, name, cron_expr, enabled, prevent_overlap, created_at, updated_at
+            ) values ('legacy-flow', 'Legacy Flow', '*/5 * * * *', 1, 1, '2026-06-27T14:00:00Z', '2026-06-27T14:00:00Z');
+            """
+        )
+
+    db.init_db()
+
+    group = db.get_group("legacy-flow")
+    assert group["continue_on_failure"] == 0
+
+
 def test_build_command_uses_argv():
     argv, display = runner.build_command(
         {"task_prompt": "Run the servicenow-agent skill"}
@@ -846,6 +879,50 @@ def test_index_shows_queued_job_as_running(tmp_path, monkeypatch):
     assert '<button class="primary" disabled>Running</button>' in html
 
 
+def test_index_shows_group_last_run_status_and_duration(tmp_path, monkeypatch):
+    monkeypatch.setattr(web.config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(web.config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(web.config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(web.config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "pi-agent",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+        }
+    )
+    group_id = db.create_group(
+        {"name": "review flow", "cron_expr": "*/10 * * * *", "enabled": 1}, [job_id]
+    )
+    db.insert_group_run(
+        {
+            "id": "group-run-1",
+            "group_id": group_id,
+            "source": "manual",
+            "started_at": "2026-06-27T14:30:01Z",
+            "finished_at": "2026-06-27T14:30:19Z",
+            "status": "failed",
+            "duration_ms": 18000,
+        }
+    )
+
+    request = Request({"type": "http", "method": "GET", "path": "/", "headers": []})
+    response = web.index(request)
+    html = web.templates.env.get_template("index.html").render(response.context)
+
+    assert response.context["groups"][0]["last_status"] == "failed"
+    assert response.context["groups"][0]["last_duration_ms"] == 18000
+    assert f'href="/groups/{group_id}/runs/group-run-1"' in html
+    assert '<span class="badge bad">failed</span>' in html
+    assert "18 s" in html
+
+
 def test_startup_syncs_existing_jobs_to_cron_file(tmp_path, monkeypatch):
     cron_file = tmp_path / "pi-agent-jobs"
     monkeypatch.setattr(web.config, "DATA_DIR", tmp_path / "data")
@@ -1113,6 +1190,66 @@ def test_group_runner_stops_after_failed_member(tmp_path, monkeypatch):
     assert group_run["status"] == "failed"
     assert [step["status"] for step in group_run["steps"]] == ["success", "failed", "skipped"]
     assert group_run["steps"][2]["run_id"] is None
+
+
+def test_group_runner_continues_after_failed_member_when_enabled(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+    monkeypatch.setattr(config, "CRON_FILE", tmp_path / "pi-agent-jobs")
+
+    prompts = []
+
+    class Result:
+        stderr = "failed"
+
+        def __init__(self, prompt):
+            self.stdout = ""
+            self.returncode = 1 if prompt == "run qa" else 0
+
+    def fake_run(argv, **kwargs):
+        prompts.append(argv[-1])
+        return Result(argv[-1])
+
+    monkeypatch.setattr(runner.subprocess, "run", fake_run)
+
+    db.init_db()
+    job_ids = []
+    for name in ["agent", "qa", "reviewer"]:
+        job_ids.append(
+            db.create_job(
+                {
+                    "name": name,
+                    "skill_name": "general",
+                    "task_prompt": f"run {name}",
+                    "cron_expr": "*/5 * * * *",
+                    "enabled": 1,
+                    "timeout_seconds": 240,
+                    "prevent_overlap": 1,
+                    "output_mode": "summary",
+                    "session_mode": "no_session",
+                }
+            )
+        )
+    group_id = db.create_group(
+        {
+            "name": "review flow",
+            "cron_expr": "*/10 * * * *",
+            "enabled": 1,
+            "continue_on_failure": 1,
+        },
+        job_ids,
+    )
+
+    exit_code = runner.run_group(group_id, source="manual")
+    group_run = db.get_group_run_with_steps(db.list_group_runs(group_id)[0]["id"])
+
+    assert exit_code == 1
+    assert prompts == ["run agent", "run qa", "run reviewer"]
+    assert group_run["status"] == "failed"
+    assert [step["status"] for step in group_run["steps"]] == ["success", "failed", "success"]
+    assert all(step["run_id"] for step in group_run["steps"])
 
 
 def test_summary_mode_runs_print_and_writes_summary_without_jsonl(tmp_path, monkeypatch):
@@ -1594,10 +1731,25 @@ def test_logs_page_lists_runs_with_filters_and_cleanup_controls(tmp_path, monkey
             "prevent_overlap": 1,
         }
     )
+    group_id = db.create_group(
+        {"name": "review flow", "cron_expr": "*/10 * * * *", "enabled": 1}, [job_id]
+    )
+    db.insert_group_run(
+        {
+            "id": "group-run-1",
+            "group_id": group_id,
+            "source": "manual",
+            "started_at": "2026-06-27T14:30:01Z",
+            "finished_at": "2026-06-27T14:30:19Z",
+            "status": "success",
+            "duration_ms": 18000,
+        }
+    )
     db.insert_run(
         {
             "id": "success-run",
             "job_id": job_id,
+            "group_run_id": "group-run-1",
             "source": "manual",
             "started_at": "2026-06-27T14:30:01Z",
             "finished_at": "2026-06-27T14:30:19Z",
@@ -1621,11 +1773,19 @@ def test_logs_page_lists_runs_with_filters_and_cleanup_controls(tmp_path, monkey
     )
 
     request = Request({"type": "http", "method": "GET", "path": "/logs", "headers": []})
-    response = web.logs_page(request, job_id=job_id, source="manual", run_status="success")
+    response = web.logs_page(
+        request,
+        job_id=job_id,
+        group_id=group_id,
+        source="manual",
+        run_status="success",
+    )
     html = web.templates.env.get_template("logs.html").render(response.context)
 
     assert [run["id"] for run in response.context["runs"]] == ["success-run"]
     assert response.context["filters"]["job_id"] == job_id
+    assert response.context["filters"]["group_id"] == group_id
+    assert f'<option value="{group_id}" selected>review flow</option>' in html
     assert 'action="/logs/cleanup"' in html
     assert "Delete All Completed Runs" in html
     assert "failed-run" not in html
@@ -1741,6 +1901,52 @@ def test_manual_group_run_queues_background_task(tmp_path, monkeypatch):
     assert response.status_code == 303
     assert response.headers["location"] == f"/?queued={group_id}"
     assert tasks.calls == [(runner.run_group, (group_id,), {"source": "manual"})]
+
+
+def test_running_group_run_detail_auto_refreshes(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "pi-agent",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+        }
+    )
+    group_id = db.create_group(
+        {"name": "review flow", "cron_expr": "*/10 * * * *", "enabled": 1}, [job_id]
+    )
+    db.insert_group_run(
+        {
+            "id": "running-group-run",
+            "group_id": group_id,
+            "source": "manual",
+            "started_at": "2026-06-27T14:30:01Z",
+            "status": "running",
+        }
+    )
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": f"/groups/{group_id}/runs/running-group-run",
+            "headers": [],
+        }
+    )
+    response = web.group_run_detail(request, group_id, "running-group-run")
+    html = web.templates.env.get_template("group_run_detail.html").render(response.context)
+
+    assert "refreshes every 5 seconds" in html
+    assert "window.location.reload(), 5000" in html
 
 
 def test_read_log_limits_large_files(tmp_path):

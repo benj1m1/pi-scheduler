@@ -66,6 +66,7 @@ def init_db() -> None:
               cron_expr text not null,
               enabled integer not null default 1,
               prevent_overlap integer not null default 1,
+              continue_on_failure integer not null default 0,
               work_start text,
               work_end text,
               created_at text not null,
@@ -148,6 +149,9 @@ def init_db() -> None:
         if "group_run_id" not in run_columns:
             conn.execute("alter table runs add column group_run_id text")
         conn.execute("create index if not exists idx_runs_group_run_id on runs(group_run_id)")
+        group_columns = {row[1] for row in conn.execute("pragma table_info(job_groups)").fetchall()}
+        if "continue_on_failure" not in group_columns:
+            conn.execute("alter table job_groups add column continue_on_failure integer not null default 0")
         conn.execute("update jobs set prevent_overlap = 1 where prevent_overlap != 1")
         conn.execute("update job_groups set prevent_overlap = 1 where prevent_overlap != 1")
 
@@ -383,9 +387,11 @@ def list_groups() -> list[dict[str, Any]]:
             """
             select
               g.*,
+              gr.id as last_group_run_id,
               gr.status as last_status,
               gr.started_at as last_started_at,
               gr.finished_at as last_finished_at,
+              gr.duration_ms as last_duration_ms,
               exists(
                 select 1 from group_runs running
                 where running.group_id = g.id and running.status = 'running'
@@ -448,8 +454,9 @@ def create_group(data: dict[str, Any], member_job_ids: list[str]) -> str:
         conn.execute(
             """
             insert into job_groups (
-              id, name, cron_expr, enabled, prevent_overlap, work_start, work_end, created_at, updated_at
-            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+              id, name, cron_expr, enabled, prevent_overlap, continue_on_failure,
+              work_start, work_end, created_at, updated_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 group_id,
@@ -457,6 +464,7 @@ def create_group(data: dict[str, Any], member_job_ids: list[str]) -> str:
                 data["cron_expr"],
                 int(data.get("enabled", 1)),
                 1,
+                int(data.get("continue_on_failure", 0)),
                 data.get("work_start"),
                 data.get("work_end"),
                 now,
@@ -481,7 +489,8 @@ def update_group(group_id: str, data: dict[str, Any], member_job_ids: list[str])
         conn.execute(
             """
             update job_groups
-            set name = ?, cron_expr = ?, enabled = ?, prevent_overlap = ?, work_start = ?, work_end = ?, updated_at = ?
+            set name = ?, cron_expr = ?, enabled = ?, prevent_overlap = ?, continue_on_failure = ?,
+                work_start = ?, work_end = ?, updated_at = ?
             where id = ? and deleted_at is null
             """,
             (
@@ -489,6 +498,7 @@ def update_group(group_id: str, data: dict[str, Any], member_job_ids: list[str])
                 data["cron_expr"],
                 int(data.get("enabled", 0)),
                 1,
+                int(data.get("continue_on_failure", 0)),
                 data.get("work_start"),
                 data.get("work_end"),
                 now,
@@ -548,6 +558,7 @@ def list_runs(
     job_id: str | None = None,
     source: str | None = None,
     status: str | None = None,
+    group_id: str | None = None,
     started_at_from: str | None = None,
     started_at_before: str | None = None,
 ) -> list[dict[str, Any]]:
@@ -562,6 +573,9 @@ def list_runs(
     if status:
         filters.append("r.status = ?")
         params.append(status)
+    if group_id:
+        filters.append("gr.group_id = ?")
+        params.append(group_id)
     if started_at_from:
         filters.append("r.started_at >= ?")
         params.append(started_at_from)

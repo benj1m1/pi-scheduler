@@ -114,6 +114,7 @@ def logs_context(
     request: Request,
     page: int = 1,
     job_id: str = "",
+    group_id: str = "",
     source: str = "all",
     run_status: str = "all",
     start_date: str = "",
@@ -125,6 +126,7 @@ def logs_context(
 ) -> dict:
     filters = {
         "job_id": job_id,
+        "group_id": group_id,
         "source": source,
         "status": run_status,
         "start_date": start_date,
@@ -148,6 +150,7 @@ def logs_context(
         limit=LOGS_PER_PAGE + 1,
         offset=(page - 1) * LOGS_PER_PAGE,
         job_id=job_id or None,
+        group_id=group_id or None,
         source=None if source == "all" else source,
         status=None if run_status == "all" else run_status,
         started_at_from=started_at_from,
@@ -158,6 +161,7 @@ def logs_context(
         "request": request,
         "runs": runs,
         "jobs": db.list_jobs(),
+        "groups": db.list_groups(),
         "page": page,
         "has_next_page": len(runs_page) > LOGS_PER_PAGE,
         "filters": filters,
@@ -342,6 +346,7 @@ def group_form_data(
     work_start: str,
     work_end: str,
     enabled: str | None,
+    continue_on_failure: str | None,
     member_job_ids: list[str] | None,
 ) -> dict:
     cron_expr = ""
@@ -361,6 +366,7 @@ def group_form_data(
         "work_end": work_end.strip() or None,
         "enabled": parse_bool(enabled),
         "prevent_overlap": 1,
+        "continue_on_failure": parse_bool(continue_on_failure),
         "member_job_ids": members,
     }
 
@@ -398,6 +404,7 @@ def with_group_schedule(group: dict) -> dict:
     group["schedule_unit"] = schedule["unit"]
     group["work_start"] = group.get("work_start") or ""
     group["work_end"] = group.get("work_end") or ""
+    group["continue_on_failure"] = int(group.get("continue_on_failure", 0))
     group["member_job_ids"] = [member["job_id"] for member in group.get("members", [])]
     return group
 
@@ -515,6 +522,7 @@ def new_group(request: Request):
         "work_end": "",
         "enabled": 1,
         "prevent_overlap": 1,
+        "continue_on_failure": 0,
         "member_job_ids": [],
     }
     return templates.TemplateResponse(
@@ -533,9 +541,19 @@ def create_group(
     work_start: Annotated[str, Form()] = "",
     work_end: Annotated[str, Form()] = "",
     enabled: Annotated[str | None, Form()] = None,
+    continue_on_failure: Annotated[str | None, Form()] = None,
     member_job_ids: Annotated[list[str] | None, Form()] = None,
 ):
-    data = group_form_data(name, schedule_every, schedule_unit, work_start, work_end, enabled, member_job_ids)
+    data = group_form_data(
+        name,
+        schedule_every,
+        schedule_unit,
+        work_start,
+        work_end,
+        enabled,
+        continue_on_failure,
+        member_job_ids,
+    )
     errors = validate_group_form(data)
     if errors:
         return templates.TemplateResponse(
@@ -593,11 +611,21 @@ def update_group(
     work_start: Annotated[str, Form()] = "",
     work_end: Annotated[str, Form()] = "",
     enabled: Annotated[str | None, Form()] = None,
+    continue_on_failure: Annotated[str | None, Form()] = None,
     member_job_ids: Annotated[list[str] | None, Form()] = None,
 ):
     if db.get_group(group_id) is None:
         raise HTTPException(status_code=404, detail="Group not found")
-    data = group_form_data(name, schedule_every, schedule_unit, work_start, work_end, enabled, member_job_ids)
+    data = group_form_data(
+        name,
+        schedule_every,
+        schedule_unit,
+        work_start,
+        work_end,
+        enabled,
+        continue_on_failure,
+        member_job_ids,
+    )
     errors = validate_group_form(data)
     if errors:
         data["id"] = group_id
@@ -724,6 +752,7 @@ def logs_page(
     request: Request,
     page: Annotated[int, Query(ge=1)] = 1,
     job_id: str = "",
+    group_id: str = "",
     source: Annotated[str, Query(pattern="^(all|auto|manual)$")] = "all",
     run_status: Annotated[
         str, Query(alias="status", pattern="^(all|running|success|failed|timeout)$")
@@ -734,7 +763,7 @@ def logs_page(
     return templates.TemplateResponse(
         request,
         "logs.html",
-        logs_context(request, page, job_id, source, run_status, start_date, end_date),
+        logs_context(request, page, job_id, group_id, source, run_status, start_date, end_date),
     )
 
 

@@ -9,6 +9,9 @@
     </div>
     <span class="badge {{ 'ok' if group_run.status == 'success' else 'bad' if group_run.status in ['failed', 'timeout'] else 'muted' }}">{{ group_run.status }}</span>
   </div>
+  {% if group_run.status == 'running' %}
+  <p class="hint">This page refreshes every 5 seconds while the group run is active.</p>
+  {% endif %}
   <dl class="wide">
     <dt>Group</dt><dd><a href="/groups/{{ group_run.group_id }}">{{ group_run.group_name or group_run.group_id }}</a></dd>
     <dt>Run</dt><dd><code>{{ group_run.id }}</code></dd>
@@ -52,4 +55,9 @@
     </table>
   </div>
 </section>
+{% if group_run.status == 'running' %}
+<script>
+  window.setTimeout(() => window.location.reload(), 5000);
+</script>
+{% endif %}
 {% endblock %}

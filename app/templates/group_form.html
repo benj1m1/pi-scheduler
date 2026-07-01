@@ -96,6 +96,8 @@
       <p id="work-window-status" class="window-status" aria-live="polite"></p>
     </fieldset>
     <label class="check"><input type="checkbox" name="enabled" {% if group.enabled %}checked{% endif %}> Enabled</label>
+    <label class="check"><input type="checkbox" name="continue_on_failure" {% if group.continue_on_failure %}checked{% endif %}> Continue after failed steps</label>
+    <p class="hint">When enabled, later members still run after a failed, timed out, or overlap-skipped step. The group run is still marked failed if any step fails.</p>
     <label class="check forced-check"><input type="checkbox" name="prevent_overlap" checked disabled> Prevent overlap</label>
     <div class="actions">
       <button class="primary" type="submit">Save</button>

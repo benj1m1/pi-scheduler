@@ -56,6 +56,15 @@
       </select>
     </label>
     <label>
+      Group
+      <select name="group_id">
+        <option value="">All groups</option>
+        {% for group in groups %}
+        <option value="{{ group.id }}" {% if filters.group_id == group.id %}selected{% endif %}>{{ group.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
       Source
       <select name="source">
         {% for key, label in run_source_filters.items() %}

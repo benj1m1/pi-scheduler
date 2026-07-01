@@ -444,6 +444,7 @@ def run_group(group_id: str, source: str = "auto") -> int:
     status = "success"
     error_summary = None
     exit_code = 0
+    continue_on_failure = bool(int(group.get("continue_on_failure", 0)))
 
     try:
         for member in group["members"]:
@@ -468,9 +469,12 @@ def run_group(group_id: str, source: str = "auto") -> int:
                     {"status": "failed", "finished_at": db.utc_now(), "error_summary": step_error},
                 )
                 status = "failed"
-                error_summary = f"Step {member['position']} failed: {step_error}"
+                if error_summary is None:
+                    error_summary = f"Step {member['position']} failed: {step_error}"
                 exit_code = 1
-                break
+                if not continue_on_failure:
+                    break
+                continue
 
             result = execute_job(
                 job,
@@ -488,16 +492,22 @@ def run_group(group_id: str, source: str = "auto") -> int:
                 },
             )
             if result.status != "success":
-                status = "timeout" if result.status == "timeout" else "failed"
-                error_summary = (
+                if result.status == "timeout":
+                    status = "timeout"
+                elif status == "success":
+                    status = "failed"
+                step_summary = (
                     f"Step {member['position']} {job['name']} ended with {result.status}"
                 )
                 if result.error_summary:
-                    error_summary = f"{error_summary}: {result.error_summary}"
+                    step_summary = f"{step_summary}: {result.error_summary}"
+                if error_summary is None:
+                    error_summary = step_summary
                 exit_code = 1
-                break
+                if not continue_on_failure:
+                    break
 
-        if status != "success":
+        if status != "success" and not continue_on_failure:
             completed_positions = {
                 step["position"]
                 for step in db.get_group_run_with_steps(group_run_id)["steps"]
