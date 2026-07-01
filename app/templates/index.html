@@ -9,12 +9,12 @@
 {% if jobs %}
 <div class="cards">
   {% for job in jobs %}
-  <article class="card">
+  <article class="card job-card">
     <div class="card-head">
       <h2><a href="/jobs/{{ job.id }}">{{ job.name }}</a></h2>
       <span class="badge {{ 'ok' if job.enabled else 'muted' }}">{{ 'enabled' if job.enabled else 'disabled' }}</span>
     </div>
-    <dl>
+    <dl class="job-card-meta">
       <dt>Prompt</dt><dd class="prompt-preview">{{ job.task_prompt|truncate(220, true) }}</dd>
       <dt>Model</dt><dd>{{ job.provider_name ~ '/' ~ job.model_id if job.provider_name and job.model_id else 'Pi default' }}</dd>
       <dt>Schedule</dt><dd>{{ job.cron_expr|describe_cron }}</dd>

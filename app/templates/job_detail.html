@@ -7,7 +7,13 @@
     <span class="badge {{ 'ok' if job.enabled else 'muted' }}">{{ 'enabled' if job.enabled else 'disabled' }}</span>
   </div>
   <dl class="wide">
-    <dt>Prompt</dt><dd>{{ job.task_prompt }}</dd>
+    <dt>Prompt</dt>
+    <dd>
+      <div class="collapsible-field" data-collapsible>
+        <div id="prompt-preview" class="collapsible-text">{{ job.task_prompt }}</div>
+        <button class="button compact collapsible-toggle" type="button" aria-expanded="false" aria-controls="prompt-preview">Expand</button>
+      </div>
+    </dd>
     <dt>Model</dt><dd>{{ job.provider_name ~ '/' ~ job.model_id if job.provider_name and job.model_id else 'Pi default' }}</dd>
     <dt>Output</dt><dd>{{ 'Detailed event log' if job.output_mode == 'events' else 'Summary only' }}</dd>
     <dt>Pi session</dt><dd>{{ 'saved' if job.session_mode == 'save' else 'not saved' }}</dd>
@@ -15,7 +21,13 @@
     <dt>Schedule</dt><dd>{{ job.cron_expr|describe_cron }}</dd>
     <dt>Work window</dt><dd>{{ job.work_start|describe_work_window(job.work_end) }}</dd>
     <dt>Cron</dt><dd><code>{{ job.cron_expr }}</code></dd>
-    <dt>Command</dt><dd><code>{{ command }}</code></dd>
+    <dt>Command</dt>
+    <dd>
+      <div class="collapsible-field" data-collapsible>
+        <div id="command-preview" class="collapsible-text command-preview"><code>{{ command }}</code></div>
+        <button class="button compact collapsible-toggle" type="button" aria-expanded="false" aria-controls="command-preview">Expand</button>
+      </div>
+    </dd>
     {% if command_error %}<dt>Command error</dt><dd><span class="bad-text">{{ command_error }}</span></dd>{% endif %}
     <dt>Timeout</dt><dd>{{ job.timeout_seconds }} seconds</dd>
     <dt>Overlap</dt><dd>{{ 'prevented' if job.prevent_overlap else 'allowed' }}</dd>
@@ -59,6 +71,24 @@
   </div>
 </section>
 <script>
+  document.querySelectorAll("[data-collapsible]").forEach((field) => {
+    const content = field.querySelector(".collapsible-text");
+    const toggle = field.querySelector(".collapsible-toggle");
+    if (!content || !toggle) return;
+
+    if (content.scrollHeight <= content.clientHeight + 1) {
+      toggle.hidden = true;
+      content.classList.add("expanded");
+      return;
+    }
+
+    toggle.addEventListener("click", () => {
+      const expanded = content.classList.toggle("expanded");
+      toggle.setAttribute("aria-expanded", String(expanded));
+      toggle.textContent = expanded ? "Collapse" : "Expand";
+    });
+  });
+
   const recentRuns = document.getElementById("recent-runs");
   const runNowForm = document.getElementById("run-now-form");
   const runNowButton = document.getElementById("run-now-button");
