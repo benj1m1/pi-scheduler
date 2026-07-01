@@ -862,6 +862,59 @@ def test_recent_runs_filter_by_source(tmp_path, monkeypatch):
     assert [run["id"] for run in manual_runs] == ["manual-run"]
 
 
+def test_get_job_runs_status_combines_reads(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "pi-agent",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+        }
+    )
+    for index, source in enumerate(["manual", "auto", "manual"]):
+        db.insert_run(
+            {
+                "id": f"{source}-run-{index}",
+                "job_id": job_id,
+                "source": source,
+                "started_at": f"2026-06-27T14:0{index}:01Z",
+                "finished_at": f"2026-06-27T14:0{index}:19Z",
+                "status": "success",
+                "duration_ms": 18000,
+                "command": "pi --mode json run",
+            }
+        )
+    db.insert_run(
+        {
+            "id": "running-run",
+            "job_id": job_id,
+            "source": "manual",
+            "started_at": "2026-06-27T14:09:01Z",
+            "status": "running",
+            "command": "pi --mode json run",
+        }
+    )
+
+    status = db.get_job_runs_status(job_id, limit=2, offset=0, source="manual")
+
+    assert status["job"]["id"] == job_id
+    assert status["has_running_run"] is True
+    assert [run["id"] for run in status["runs"]] == ["running-run", "manual-run-2"]
+
+    db.soft_delete_job(job_id)
+
+    assert db.get_job_runs_status(job_id) is None
+
+
 def test_job_runs_status_reports_running_state(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
     monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")

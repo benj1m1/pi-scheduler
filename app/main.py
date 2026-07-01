@@ -331,11 +331,14 @@ def job_detail(
     source: Annotated[str, Query(pattern="^(all|auto|manual)$")] = "all",
     queued: Annotated[int, Query(ge=0, le=1)] = 0,
 ):
-    job = db.get_job(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="Job not found")
     run_source = None if source == "all" else source
-    runs_page = db.list_recent_runs(job_id, RUNS_PER_PAGE + 1, (page - 1) * RUNS_PER_PAGE, run_source)
+    status_data = db.get_job_runs_status(
+        job_id, RUNS_PER_PAGE + 1, (page - 1) * RUNS_PER_PAGE, run_source
+    )
+    if status_data is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    job = status_data["job"]
+    runs_page = status_data["runs"]
     runs = runs_page[:RUNS_PER_PAGE]
     has_next_page = len(runs_page) > RUNS_PER_PAGE
     command_error = None
@@ -357,7 +360,7 @@ def job_detail(
             "has_next_page": has_next_page,
             "source": source,
             "run_source_filters": RUN_SOURCE_FILTERS,
-            "has_running_run": bool(queued) or db.has_running_run(job_id),
+            "has_running_run": bool(queued) or status_data["has_running_run"],
         },
     )
 
@@ -368,13 +371,16 @@ def job_runs_status(
     page: Annotated[int, Query(ge=1)] = 1,
     source: Annotated[str, Query(pattern="^(all|auto|manual)$")] = "all",
 ):
-    if db.get_job(job_id) is None:
-        raise HTTPException(status_code=404, detail="Job not found")
     run_source = None if source == "all" else source
-    runs_page = db.list_recent_runs(job_id, RUNS_PER_PAGE + 1, (page - 1) * RUNS_PER_PAGE, run_source)
+    status_data = db.get_job_runs_status(
+        job_id, RUNS_PER_PAGE + 1, (page - 1) * RUNS_PER_PAGE, run_source
+    )
+    if status_data is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    runs_page = status_data["runs"]
     runs = runs_page[:RUNS_PER_PAGE]
     return {
-        "has_running_run": db.has_running_run(job_id),
+        "has_running_run": status_data["has_running_run"],
         "runs": [format_run_summary(run) for run in runs],
         "page": page,
         "has_next_page": len(runs_page) > RUNS_PER_PAGE,

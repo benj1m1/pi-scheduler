@@ -138,6 +138,32 @@ def get_job(job_id: str) -> dict[str, Any] | None:
         return row_to_dict(row)
 
 
+def get_job_runs_status(
+    job_id: str,
+    limit: int = 50,
+    offset: int = 0,
+    source: str | None = None,
+) -> dict[str, Any] | None:
+    with connect() as conn:
+        job = row_to_dict(
+            conn.execute(
+                "select * from jobs where id = ? and deleted_at is null", (job_id,)
+            ).fetchone()
+        )
+        if job is None:
+            return None
+
+        running = conn.execute(
+            "select 1 from runs where job_id = ? and status = 'running' limit 1",
+            (job_id,),
+        ).fetchone()
+        return {
+            "job": job,
+            "runs": list_recent_runs_for_connection(conn, job_id, limit, offset, source),
+            "has_running_run": running is not None,
+        }
+
+
 def create_job(data: dict[str, Any]) -> str:
     now = utc_now()
     with connect() as conn:
@@ -229,26 +255,36 @@ def list_recent_runs(
     source: str | None = None,
 ) -> list[dict[str, Any]]:
     with connect() as conn:
-        filters = ["status != 'disabled'"]
-        params: list[Any] = []
-        if job_id:
-            filters.append("job_id = ?")
-            params.append(job_id)
-        if source:
-            filters.append("source = ?")
-            params.append(source)
-        params.extend([limit, offset])
-        rows = conn.execute(
-            f"""
-            select id, job_id, source, started_at, finished_at, status, exit_code, duration_ms
-            from runs
-            where {' and '.join(filters)}
-            order by started_at desc
-            limit ? offset ?
-            """,
-            params,
-        ).fetchall()
-        return [dict(row) for row in rows]
+        return list_recent_runs_for_connection(conn, job_id, limit, offset, source)
+
+
+def list_recent_runs_for_connection(
+    conn: sqlite3.Connection,
+    job_id: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    source: str | None = None,
+) -> list[dict[str, Any]]:
+    filters = ["status != 'disabled'"]
+    params: list[Any] = []
+    if job_id:
+        filters.append("job_id = ?")
+        params.append(job_id)
+    if source:
+        filters.append("source = ?")
+        params.append(source)
+    params.extend([limit, offset])
+    rows = conn.execute(
+        f"""
+        select id, job_id, source, started_at, finished_at, status, exit_code, duration_ms
+        from runs
+        where {' and '.join(filters)}
+        order by started_at desc
+        limit ? offset ?
+        """,
+        params,
+    ).fetchall()
+    return [dict(row) for row in rows]
 
 
 def has_running_run(job_id: str) -> bool:
