@@ -125,7 +125,36 @@ pre { overflow: auto; padding: 1rem; white-space: pre-wrap; }
 }
 .command-preview::after { background: linear-gradient(rgb(37 33 29 / 0), #25211d 78%); }
 .command-preview code { background: transparent; color: inherit; padding: 0; }
-.compact { font-size: 0.9rem; padding: 0.35rem 0.7rem; width: fit-content; }
+.inline-toggle {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  color: #a8491f;
+  display: inline-flex;
+  font-size: 0.9rem;
+  font-weight: 800;
+  gap: 0.28rem;
+  justify-self: start;
+  padding: 0;
+  text-decoration: none;
+}
+.inline-toggle::after {
+  border-bottom: 1.5px solid currentColor;
+  border-right: 1.5px solid currentColor;
+  content: "";
+  height: 0.38rem;
+  margin-top: -0.15rem;
+  transform: rotate(45deg);
+  transition: transform 160ms ease;
+  width: 0.38rem;
+}
+.inline-toggle[aria-expanded="true"]::after {
+  margin-top: 0.15rem;
+  transform: rotate(225deg);
+}
+.inline-toggle:hover { color: #7f3518; text-decoration: underline; }
+.inline-toggle:focus-visible { outline: 2px solid #d05d28; outline-offset: 3px; }
 .log-head { align-items: center; display: flex; gap: 1rem; justify-content: space-between; }
 .log-head h2 { margin-bottom: 0; }
 .log-box { max-height: min(58vh, 34rem); overscroll-behavior: contain; }

@@ -1146,6 +1146,7 @@ def test_job_detail_shows_only_recent_runs_with_logs_link(tmp_path, monkeypatch)
     assert f'href="/logs?job_id={job_id}"' in html
     assert 'id="prompt-preview" class="collapsible-text"' in html
     assert 'id="command-preview" class="collapsible-text command-preview"' in html
+    assert 'class="inline-toggle collapsible-toggle"' in html
     assert 'id="previous-page"' not in html
     assert 'id="next-page"' not in html
 
