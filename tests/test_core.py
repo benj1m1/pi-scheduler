@@ -104,6 +104,40 @@ def test_db_defaults_new_jobs_to_summary_without_session(tmp_path, monkeypatch):
     assert job["tool_mode"] == "full"
 
 
+def test_db_init_creates_performance_indexes(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    db.init_db()
+
+    with db.connect() as conn:
+        rows = conn.execute(
+            """
+            select name, sql
+            from sqlite_master
+            where type = 'index' and name in (
+              'idx_jobs_deleted_created_at',
+              'idx_runs_job_active_started_at',
+              'idx_runs_running_job',
+              'idx_runs_job_source_active_started_at'
+            )
+            """
+        ).fetchall()
+
+    indexes = {row["name"]: row["sql"] for row in rows}
+
+    assert set(indexes) == {
+        "idx_jobs_deleted_created_at",
+        "idx_runs_job_active_started_at",
+        "idx_runs_running_job",
+        "idx_runs_job_source_active_started_at",
+    }
+    assert "where status != 'disabled'" in indexes["idx_runs_job_active_started_at"].lower()
+    assert "where status = 'running'" in indexes["idx_runs_running_job"].lower()
+
+
 def test_db_migrates_existing_jobs_to_events_with_saved_sessions(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
     monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")

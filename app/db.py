@@ -62,6 +62,10 @@ def init_db() -> None:
             create index if not exists idx_runs_job_started_at on runs(job_id, started_at desc);
             create index if not exists idx_runs_job_source_started_at on runs(job_id, source, started_at desc);
             create index if not exists idx_runs_started_at on runs(started_at desc);
+            create index if not exists idx_jobs_deleted_created_at on jobs(deleted_at, created_at desc);
+            create index if not exists idx_runs_job_active_started_at on runs(job_id, started_at desc) where status != 'disabled';
+            create index if not exists idx_runs_running_job on runs(job_id) where status = 'running';
+            create index if not exists idx_runs_job_source_active_started_at on runs(job_id, source, started_at desc) where status != 'disabled';
             """
         )
         columns = {row[1] for row in conn.execute("pragma table_info(jobs)").fetchall()}
