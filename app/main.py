@@ -577,12 +577,14 @@ def update_job(
 
 
 @app.post("/jobs/{job_id}/toggle", dependencies=[Depends(require_auth)])
-def toggle_job(job_id: str):
+def toggle_job(job_id: str, return_to: Annotated[str, Form()] = ""):
     job = db.get_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
     db.set_job_enabled(job_id, not bool(job["enabled"]))
     cron.write_cron_file()
+    if return_to == "detail":
+        return redirect_to(f"/jobs/{job_id}")
     return redirect_to("/")
 
 

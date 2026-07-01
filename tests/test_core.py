@@ -547,6 +547,34 @@ def test_toggle_buttons_use_stateful_action_styles(tmp_path, monkeypatch):
 
     assert '<button class="toggle-enable">Enable</button>' in index_html
     assert '<button class="toggle-enable">Enable</button>' in detail_html
+    assert '<input type="hidden" name="return_to" value="index">' in index_html
+    assert '<input type="hidden" name="return_to" value="detail">' in detail_html
+
+
+def test_toggle_job_redirects_back_to_detail_when_requested(tmp_path, monkeypatch):
+    monkeypatch.setattr(web.config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(web.config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(web.config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(web.config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "pi-agent",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+        }
+    )
+
+    response = web.toggle_job(job_id, return_to="detail")
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/jobs/{job_id}"
+    assert db.get_job(job_id)["enabled"] == 0
 
 
 def test_index_shows_running_job_state(tmp_path, monkeypatch):

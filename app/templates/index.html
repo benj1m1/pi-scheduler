@@ -31,7 +31,10 @@
     </dl>
     <div class="actions">
       <a class="button" href="/jobs/{{ job.id }}">Details</a>
-      <form method="post" action="/jobs/{{ job.id }}/toggle"><button class="{{ 'toggle-disable' if job.enabled else 'toggle-enable' }}">{{ 'Disable' if job.enabled else 'Enable' }}</button></form>
+      <form method="post" action="/jobs/{{ job.id }}/toggle">
+        <input type="hidden" name="return_to" value="index">
+        <button class="{{ 'toggle-disable' if job.enabled else 'toggle-enable' }}">{{ 'Disable' if job.enabled else 'Enable' }}</button>
+      </form>
       <form method="post" action="/jobs/{{ job.id }}/run">
         <input type="hidden" name="return_to" value="index">
         <button class="primary" {% if job.has_running_run %}disabled{% endif %}>{{ 'Running' if job.has_running_run else 'Run Now' }}</button>
