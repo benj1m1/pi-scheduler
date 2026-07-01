@@ -39,7 +39,7 @@
   </dl>
   <div class="actions">
     <a class="button" href="/jobs/{{ job.id }}/edit">Edit</a>
-    <form method="post" action="/jobs/{{ job.id }}/toggle"><button>{{ 'Disable' if job.enabled else 'Enable' }}</button></form>
+    <form method="post" action="/jobs/{{ job.id }}/toggle"><button class="{{ 'toggle-disable' if job.enabled else 'toggle-enable' }}">{{ 'Disable' if job.enabled else 'Enable' }}</button></form>
     <form id="run-now-form" method="post" action="/jobs/{{ job.id }}/run">
       <button id="run-now-button" class="primary" {% if has_running_run %}disabled{% endif %}>{{ 'Running' if has_running_run else 'Run Now' }}</button>
     </form>

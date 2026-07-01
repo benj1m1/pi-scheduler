@@ -518,6 +518,37 @@ def test_index_renders_for_authenticated_user(tmp_path, monkeypatch):
     assert response.status_code == 200
 
 
+def test_toggle_buttons_use_stateful_action_styles(tmp_path, monkeypatch):
+    monkeypatch.setattr(web.config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(web.config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(web.config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(web.config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "disabled-agent",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 0,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+        }
+    )
+
+    index_request = Request({"type": "http", "method": "GET", "path": "/", "headers": []})
+    index_response = web.index(index_request)
+    index_html = web.templates.env.get_template("index.html").render(index_response.context)
+
+    detail_request = Request({"type": "http", "method": "GET", "path": f"/jobs/{job_id}", "headers": []})
+    detail_response = web.job_detail(detail_request, job_id)
+    detail_html = web.templates.env.get_template("job_detail.html").render(detail_response.context)
+
+    assert '<button class="toggle-enable">Enable</button>' in index_html
+    assert '<button class="toggle-enable">Enable</button>' in detail_html
+
+
 def test_index_shows_running_job_state(tmp_path, monkeypatch):
     monkeypatch.setattr(web.config, "DATA_DIR", tmp_path / "data")
     monkeypatch.setattr(web.config, "LOG_DIR", tmp_path / "logs")
@@ -552,6 +583,7 @@ def test_index_shows_running_job_state(tmp_path, monkeypatch):
     html = web.templates.env.get_template("index.html").render(response.context)
 
     assert response.context["jobs"][0]["has_running_run"] == 1
+    assert '<button class="toggle-disable">Disable</button>' in html
     assert '<button class="primary" disabled>Running</button>' in html
 
 
@@ -1144,6 +1176,7 @@ def test_job_detail_shows_only_recent_runs_with_logs_link(tmp_path, monkeypatch)
     assert len(response.context["runs"]) == web.RUNS_PER_PAGE
     assert response.context["runs"][0]["id"] == "run-11"
     assert f'href="/logs?job_id={job_id}"' in html
+    assert '<button class="toggle-disable">Disable</button>' in html
     assert '<textarea id="prompt-preview" class="readonly-field collapsible-text expanded" rows="1" readonly' in html
     assert 'aria-controls="prompt-preview"' not in html
     assert 'id="command-preview" class="collapsible-text command-preview' in html

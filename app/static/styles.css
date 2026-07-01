@@ -16,11 +16,15 @@
   --primary-soft: #ffe2ca;
   --success-bg: #ddf6d2;
   --success-text: #235c1d;
+  --success-action: #2f7d32;
+  --success-action-strong: #205f24;
   --danger: #8e211e;
   --danger-bg: #ffe0d9;
   --danger-border: #e6a093;
   --warning-bg: #fff0c4;
   --warning-text: #704b00;
+  --warning-action: #b56a00;
+  --warning-action-strong: #8b4d00;
   --code-bg: #231f1a;
   --code-text: #ffe8c2;
   --focus: #d05d28;
@@ -376,6 +380,10 @@ button:disabled, button.primary:disabled {
 .button-compact { font-size: 0.88rem; min-height: 2rem; padding: 0.36rem 0.72rem; }
 .primary { background: var(--primary); border-color: var(--primary); color: white; }
 .primary:hover { background: var(--primary-strong); border-color: var(--primary-strong); color: white; }
+.toggle-enable { background: var(--success-action); border-color: var(--success-action); color: white; }
+.toggle-enable:hover { background: var(--success-action-strong); border-color: var(--success-action-strong); color: white; }
+.toggle-disable { background: var(--warning-action); border-color: var(--warning-action); color: white; }
+.toggle-disable:hover { background: var(--warning-action-strong); border-color: var(--warning-action-strong); color: white; }
 .danger { background: var(--danger); border-color: var(--danger); color: white; }
 .danger:hover { background: #6f1715; border-color: #6f1715; color: white; }
 
