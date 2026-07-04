@@ -373,6 +373,11 @@ def with_schedule(job: dict) -> dict:
     return job
 
 
+def selectable_run_users() -> list[str]:
+    default_user = config.CRON_USER
+    return [user for user in run_users.allowed_run_users() if user != default_user]
+
+
 def job_form_context(request: Request, job: dict, errors: list[str], action: str, title: str) -> dict:
     model_config_error = None
     try:
@@ -394,7 +399,7 @@ def job_form_context(request: Request, job: dict, errors: list[str], action: str
         "model_config_error": model_config_error,
         "models_file": str(config.PI_MODELS_FILE),
         "hour_options": hour_options(),
-        "allowed_run_users": run_users.allowed_run_users(),
+        "allowed_run_users": selectable_run_users(),
         "default_run_user": config.CRON_USER,
         "approved_skills": catalog,
         "selected_skill_ids": selected_skill_ids,
@@ -490,7 +495,7 @@ def group_form_context(request: Request, group: dict, errors: list[str], action:
         "jobs": db.list_jobs(),
         "member_job_ids": member_job_ids,
         "hour_options": hour_options(),
-        "allowed_run_users": run_users.allowed_run_users(),
+        "allowed_run_users": selectable_run_users(),
         "default_run_user": config.CRON_USER,
     }
 

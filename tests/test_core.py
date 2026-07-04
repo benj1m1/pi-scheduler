@@ -239,6 +239,30 @@ def test_parse_skill_ids_normalizes_repeated_and_newline_values():
     assert approved_skills.parse_skill_ids(["pdf", "", "obsidian-markdown"]) == ["pdf", "obsidian-markdown"]
 
 
+def test_form_context_excludes_default_run_user_from_explicit_choices(monkeypatch):
+    monkeypatch.setattr(config, "CRON_USER", "pi-scheduler-agent")
+    monkeypatch.setattr(config, "ALLOWED_RUN_USERS", "root,pi-scheduler-agent", raising=False)
+
+    job_context = web.job_form_context(
+        request=None,
+        job={"name": "agent", "task_prompt": "check logs", "run_user": ""},
+        errors=[],
+        action="/jobs/new",
+        title="New Job",
+    )
+    group_context = web.group_form_context(
+        request=None,
+        group={"name": "flow", "run_user": "", "member_job_ids": []},
+        errors=[],
+        action="/groups/new",
+        title="New Group",
+    )
+
+    assert job_context["default_run_user"] == "pi-scheduler-agent"
+    assert job_context["allowed_run_users"] == ["root"]
+    assert group_context["allowed_run_users"] == ["root"]
+
+
 def test_job_form_context_includes_catalog_and_selected_skill_ids(tmp_path, monkeypatch):
     root = tmp_path / "approved-skills"
     (root / "pdf").mkdir(parents=True)

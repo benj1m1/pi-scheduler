@@ -87,7 +87,7 @@
       <legend>Run user</legend>
       <label>Run as user
         <select name="run_user">
-          <option value="" {% if not job.run_user %}selected{% endif %}>Default ({{ default_run_user }})</option>
+          <option value="" {% if not job.run_user or job.run_user == default_run_user %}selected{% endif %}>Default ({{ default_run_user }})</option>
           {% for user in allowed_run_users %}
           <option value="{{ user }}" {% if job.run_user == user %}selected{% endif %}>{{ user }}</option>
           {% endfor %}
