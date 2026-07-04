@@ -10,7 +10,32 @@
     {% set current_path = request.url.path if request is defined else '' %}
     <a class="skip-link" href="#content">Skip to content</a>
     <header class="app-header">
-      <a class="brand" href="/" {% if current_path == '/' %}aria-current="page"{% endif %}>Pi Scheduler</a>
+      {% set header_pause_status = global_pause_status() %}
+      <div class="brand-cluster">
+        <a class="brand" href="/" {% if current_path == '/' %}aria-current="page"{% endif %}>Pi Scheduler</a>
+        <details class="header-governance">
+          <summary>
+            <span class="header-status-dot {{ 'is-paused' if header_pause_status.paused else 'is-active' }}" aria-hidden="true"></span>
+            <span>Scheduler</span>
+            <strong>{{ 'paused' if header_pause_status.paused else 'active' }}</strong>
+          </summary>
+          <div class="header-governance-menu">
+            {% if header_pause_status.paused %}
+            <p><strong>Paused.</strong> {{ header_pause_status.reason }}</p>
+            <form method="post" action="/governance/resume">
+              <input name="reason" required placeholder="Resume reason">
+              <button type="submit">Resume</button>
+            </form>
+            {% else %}
+            <p>Pause all automatic and manual execution.</p>
+            <form method="post" action="/governance/pause">
+              <input name="reason" required placeholder="Pause reason">
+              <button class="danger" type="submit">Pause all</button>
+            </form>
+            {% endif %}
+          </div>
+        </details>
+      </div>
       <nav aria-label="Primary">
         <a href="/jobs/new" {% if current_path == '/jobs/new' %}aria-current="page"{% endif %}>New Job</a>
         <a href="/groups/new" {% if current_path == '/groups/new' %}aria-current="page"{% endif %}>New Group</a>

@@ -215,6 +215,7 @@ templates.env.filters["describe_run_user"] = run_users.describe_run_user
 templates.env.filters["describe_skills_mode"] = describe_skills_mode
 templates.env.filters["describe_job_skills"] = describe_job_skills
 templates.env.filters["group_run_path"] = group_run_path
+templates.env.globals["global_pause_status"] = governance.pause_status
 
 
 def require_auth(credentials: Annotated[HTTPBasicCredentials, Depends(security)]) -> str:

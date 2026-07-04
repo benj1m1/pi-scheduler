@@ -1968,6 +1968,11 @@ def test_index_uses_compact_status_cards(tmp_path, monkeypatch):
     response = web.index(request)
     html = web.templates.env.get_template("index.html").render(response.context)
 
+    assert "Operations dashboard" not in html
+    assert "header-governance" in html
+    assert "Scheduler" in html
+    assert "1 job" in html
+    assert "<strong>0</strong> groups" in html
     assert "status-tile-grid" in html
     assert "context-chips" in html
     assert "prompt-snippet" in html

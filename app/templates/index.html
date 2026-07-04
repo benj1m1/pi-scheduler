@@ -1,39 +1,17 @@
 {% extends "base.html" %}
 {% block title %}Jobs - Pi Scheduler{% endblock %}
 {% block content %}
-<section class="hero page-hero">
+{% set job_count = jobs|length %}
+{% set group_count = groups|length %}
+<section class="dashboard-summary">
   <div>
-    <p class="eyebrow">Operations dashboard</p>
     <h1>Scheduled Pi Tasks</h1>
-    <p>Manage app-owned cron jobs that run Pi prompts, prevent overlapping executions, and write structured logs.</p>
+    <p>App-owned cron jobs and groups with run history, governance metadata, and safe execution controls.</p>
   </div>
-  <div class="hero-stat">
-    <strong>{{ groups|length + jobs|length }}</strong>
-    <span>scheduled targets</span>
+  <div class="summary-stats" aria-label="Scheduled target counts">
+    <span><strong>{{ job_count }}</strong> {{ 'job' if job_count == 1 else 'jobs' }}</span>
+    <span><strong>{{ group_count }}</strong> {{ 'group' if group_count == 1 else 'groups' }}</span>
   </div>
-</section>
-
-<section class="panel governance-panel">
-  <div class="card-head">
-    <div>
-      <p class="eyebrow">Governance</p>
-      <h2>Scheduler control</h2>
-      <p class="hint">Pause or resume all automatic and manual agent execution.</p>
-    </div>
-    <span class="badge {{ 'bad' if pause_status.paused else 'ok' }}">{{ 'paused' if pause_status.paused else 'active' }}</span>
-  </div>
-  {% if pause_status.paused %}
-  <p><strong>Reason:</strong> {{ pause_status.reason }}</p>
-  <form method="post" action="/governance/resume" class="inline-form">
-    <input name="reason" required placeholder="Resume reason">
-    <button type="submit">Resume</button>
-  </form>
-  {% else %}
-  <form method="post" action="/governance/pause" class="inline-form">
-    <input name="reason" required placeholder="Pause reason">
-    <button class="danger" type="submit">Pause all</button>
-  </form>
-  {% endif %}
 </section>
 
 {% if pause_status.paused %}
@@ -47,7 +25,7 @@
   <div class="section-head">
     <div>
       <p class="eyebrow">Job groups</p>
-      <h2>Linear task chains</h2>
+      <h2>Linear task chains <span class="section-count">{{ group_count }} {{ 'group' if group_count == 1 else 'groups' }}</span></h2>
       <p class="hint">Groups schedule existing jobs in order while each member keeps its own log path.</p>
     </div>
     <a class="button" href="/groups/new">New Group</a>
@@ -114,7 +92,7 @@
   <div class="section-head">
     <div>
       <p class="eyebrow">Jobs</p>
-      <h2>Task cards</h2>
+      <h2>Task cards <span class="section-count">{{ job_count }} {{ 'job' if job_count == 1 else 'jobs' }}</span></h2>
       <p class="hint">Standalone jobs can run on their own schedule or as members of a group.</p>
     </div>
     <a class="button" href="/jobs/new">New Job</a>
