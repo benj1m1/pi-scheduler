@@ -689,6 +689,16 @@ def test_render_cron_file_adds_discovered_pi_node_bin_to_path(tmp_path, monkeypa
     assert path_line.index(str(pi_bin)) < path_line.index("/usr/local/bin")
 
 
+def test_run_local_script_syntax_and_defaults():
+    script = Path("/opt/pi-scheduler/deploy/run-local.sh")
+    assert script.exists()
+    content = script.read_text(encoding="utf-8")
+    assert "deploy/setup-runtime-user.sh" in content
+    assert 'PI_SCHEDULER_CRON_USER="${PI_SCHEDULER_CRON_USER:-pi-scheduler-agent}"' in content
+    assert 'PI_SCHEDULER_ALLOWED_RUN_USERS="${PI_SCHEDULER_ALLOWED_RUN_USERS:-root,pi-scheduler-agent}"' in content
+    assert "uvicorn app.main:app" in content
+
+
 def test_setup_runtime_user_script_syntax_and_defaults():
     script = Path("/opt/pi-scheduler/deploy/setup-runtime-user.sh")
     assert script.exists()
