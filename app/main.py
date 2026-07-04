@@ -71,10 +71,22 @@ def seconds_duration(value: int | None) -> str:
 
 def describe_skills_mode(value: str | None) -> str:
     if value == "approved":
-        return "Approved skill paths only"
+        return "Approved skills"
     if value == "runtime":
         return "Runtime user default skills"
     return "No skills"
+
+
+def describe_job_skills(job: dict) -> str:
+    mode = job.get("skills_mode") or "none"
+    if mode == "runtime":
+        return "Runtime user default skills"
+    if mode != "approved":
+        return "No skills"
+    ids = approved_skills.parse_skill_ids(job.get("skill_ids"))
+    if not ids:
+        return "Approved skills: none selected"
+    return "Approved: " + ", ".join(ids)
 
 
 def run_status_class(status_value: str) -> str:
@@ -193,6 +205,7 @@ templates.env.filters["describe_cron"] = cron.describe_cron
 templates.env.filters["describe_work_window"] = work_window.describe
 templates.env.filters["describe_run_user"] = run_users.describe_run_user
 templates.env.filters["describe_skills_mode"] = describe_skills_mode
+templates.env.filters["describe_job_skills"] = describe_job_skills
 templates.env.filters["group_run_path"] = group_run_path
 
 
@@ -367,6 +380,10 @@ def job_form_context(request: Request, job: dict, errors: list[str], action: str
     except pi_models.ModelConfigError as exc:
         model_options = []
         model_config_error = str(exc)
+    catalog = approved_skills.list_skills()
+    selected_skill_ids = set(approved_skills.parse_skill_ids(job.get("skill_ids")))
+    catalog_ids = {entry.id for entry in catalog}
+    missing_skill_ids = sorted(selected_skill_ids - catalog_ids)
     return {
         "request": request,
         "job": job,
@@ -379,6 +396,9 @@ def job_form_context(request: Request, job: dict, errors: list[str], action: str
         "hour_options": hour_options(),
         "allowed_run_users": run_users.allowed_run_users(),
         "default_run_user": config.CRON_USER,
+        "approved_skills": catalog,
+        "selected_skill_ids": selected_skill_ids,
+        "missing_skill_ids": missing_skill_ids,
     }
 
 

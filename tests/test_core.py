@@ -239,6 +239,32 @@ def test_parse_skill_ids_normalizes_repeated_and_newline_values():
     assert approved_skills.parse_skill_ids(["pdf", "", "obsidian-markdown"]) == ["pdf", "obsidian-markdown"]
 
 
+def test_job_form_context_includes_catalog_and_selected_skill_ids(tmp_path, monkeypatch):
+    root = tmp_path / "approved-skills"
+    (root / "pdf").mkdir(parents=True)
+    (root / "pdf" / "SKILL.md").write_text("---\nname: pdf\ndescription: PDFs\n---\n", encoding="utf-8")
+    monkeypatch.setattr(config, "APPROVED_SKILLS_DIR", root, raising=False)
+
+    context = web.job_form_context(
+        request=None,
+        job={
+            "name": "agent",
+            "task_prompt": "check logs",
+            "schedule_every": "5",
+            "schedule_unit": "minutes",
+            "skills_mode": "approved",
+            "skill_ids": "pdf\nmissing",
+        },
+        errors=[],
+        action="/jobs/new",
+        title="New Job",
+    )
+
+    assert [entry.id for entry in context["approved_skills"]] == ["pdf"]
+    assert context["selected_skill_ids"] == {"pdf", "missing"}
+    assert context["missing_skill_ids"] == ["missing"]
+
+
 def test_group_form_data_includes_run_user(monkeypatch):
     from app import run_users
 
