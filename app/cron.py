@@ -84,7 +84,7 @@ def render_cron_file(jobs: list[dict] | None = None, groups: list[dict] | None =
     lines = [
         "# Managed by pi-scheduler. Do not edit manually.",
         "SHELL=/bin/bash",
-        "PATH=/usr/local/bin:/usr/bin:/bin",
+        f"PATH={config.cron_path()}",
         f"PI_SCHEDULER_HOME={config.SCHEDULER_HOME}",
         "",
     ]

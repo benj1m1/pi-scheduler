@@ -536,6 +536,24 @@ def test_pi_events_to_transcript_includes_thinking_and_tools():
     assert '"output": "ok"' in transcript
 
 
+def test_render_cron_file_adds_discovered_pi_node_bin_to_path(tmp_path, monkeypatch):
+    pi_bin = tmp_path / "pi-node" / "node-v1" / "bin"
+    pi_bin.mkdir(parents=True)
+    pi_binary = pi_bin / "pi"
+    pi_binary.write_text("#!/bin/sh\n", encoding="utf-8")
+    pi_binary.chmod(0o755)
+
+    monkeypatch.setattr(config, "PI_BINARY", "pi")
+    monkeypatch.setattr(config, "PI_NODE_ROOT", tmp_path / "pi-node", raising=False)
+    monkeypatch.setattr(config, "DEFAULT_CRON_PATH", "/usr/local/bin:/usr/bin:/bin", raising=False)
+
+    content = cron.render_cron_file([], [])
+
+    path_line = next(line for line in content.splitlines() if line.startswith("PATH="))
+    assert str(pi_bin) in path_line.split("=")[1].split(":")
+    assert path_line.index(str(pi_bin)) < path_line.index("/usr/local/bin")
+
+
 def test_render_cron_file():
     content = cron.render_cron_file(
         [
