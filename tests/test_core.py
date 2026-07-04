@@ -456,6 +456,26 @@ def test_job_create_records_audit_event(tmp_path, monkeypatch):
     assert events[0]["after"]["owner"] == "Ben"
 
 
+def test_audit_page_renders_events(tmp_path, monkeypatch):
+    from app import governance
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+    db.init_db()
+    governance.record_audit_event("admin", "job.created", "job", "agent", "Created job agent", after={"name": "agent"})
+    request = Request({"type": "http", "method": "GET", "path": "/audit", "headers": []})
+
+    response = web.audit_log(request)
+    html = web.templates.env.get_template("audit.html").render(response.context)
+
+    assert "Audit Log" in html
+    assert "job.created" in html
+    assert "Created job agent" in html
+    assert "admin" in html
+
+
 def test_audit_event_round_trip(tmp_path, monkeypatch):
     from app import governance
 

@@ -24,6 +24,7 @@ app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")
 BEIJING_TZ = ZoneInfo("Asia/Shanghai")
 RUNS_PER_PAGE = 10
 LOGS_PER_PAGE = 50
+AUDIT_PER_PAGE = 50
 LOG_PREVIEW_BYTES = 200 * 1024
 RUN_SOURCE_FILTERS = {
     "all": "All",
@@ -1052,6 +1053,35 @@ def job_runs_status(
         "page": page,
         "has_next_page": len(runs_page) > RUNS_PER_PAGE,
     }
+
+
+@app.get("/audit", dependencies=[Depends(require_auth)])
+def audit_log(
+    request: Request,
+    page: Annotated[int, Query(ge=1)] = 1,
+    target_type: str = "",
+    event_type: str = "",
+    target_id: str = "",
+):
+    events_page = governance.list_audit_events(
+        limit=AUDIT_PER_PAGE + 1,
+        offset=(page - 1) * AUDIT_PER_PAGE,
+        target_type=target_type or None,
+        event_type=event_type or None,
+        target_id=target_id or None,
+    )
+    events = events_page[:AUDIT_PER_PAGE]
+    return templates.TemplateResponse(
+        request,
+        "audit.html",
+        {
+            "request": request,
+            "events": events,
+            "filters": {"target_type": target_type, "event_type": event_type, "target_id": target_id},
+            "page": page,
+            "has_next_page": len(events_page) > AUDIT_PER_PAGE,
+        },
+    )
 
 
 @app.get("/logs", dependencies=[Depends(require_auth)])

@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Audit Log - Pi Scheduler{% endblock %}
+{% block content %}
+<section class="panel page-panel">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Governance</p>
+      <h1>Audit Log</h1>
+      <p class="hint">Trace administrative changes, manual run requests, and scheduler pause/resume events.</p>
+    </div>
+  </div>
+  <form class="filters" method="get" action="/audit">
+    <label>Target type <input name="target_type" value="{{ filters.target_type }}" placeholder="job, group, system"></label>
+    <label>Event type <input name="event_type" value="{{ filters.event_type }}" placeholder="job.updated"></label>
+    <label>Target id <input name="target_id" value="{{ filters.target_id }}"></label>
+    <button type="submit">Filter</button>
+    <a class="button-secondary" href="/audit">Clear</a>
+  </form>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead><tr><th>Time</th><th>Actor</th><th>Event</th><th>Target</th><th>Summary</th><th>Details</th></tr></thead>
+      <tbody>
+      {% for event in events %}
+      <tr>
+        <td>{{ event.created_at|beijing_time }}</td>
+        <td>{{ event.actor }}</td>
+        <td><code>{{ event.event_type }}</code></td>
+        <td>{{ event.target_type }}{% if event.target_id %}: {{ event.target_id }}{% endif %}</td>
+        <td>{{ event.summary }}</td>
+        <td>
+          <details>
+            <summary>JSON</summary>
+            <pre>{{ {'before': event.before, 'after': event.after}|tojson(indent=2) }}</pre>
+          </details>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6">No audit events found.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="actions">
+    {% if page > 1 %}<a class="button" href="/audit?page={{ page - 1 }}">Previous</a>{% endif %}
+    {% if has_next_page %}<a class="button" href="/audit?page={{ page + 1 }}">Next</a>{% endif %}
+  </div>
+</section>
+{% endblock %}
