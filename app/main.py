@@ -240,6 +240,17 @@ def redirect_to(path: str) -> RedirectResponse:
     return RedirectResponse(path, status_code=status.HTTP_303_SEE_OTHER)
 
 
+def source_ip(request: Request) -> str | None:
+    return request.client.host if request.client else None
+
+
+def ensure_execution_allowed(target: dict, target_label: str) -> None:
+    if governance.is_paused():
+        raise HTTPException(status_code=400, detail="Scheduler is globally paused")
+    if governance.is_target_expired(target):
+        raise HTTPException(status_code=400, detail=f"{target_label} is expired")
+
+
 def parse_bool(value: str | None) -> int:
     return 1 if value in {"on", "1", "true", "yes"} else 0
 
@@ -565,7 +576,11 @@ def index(request: Request, queued: str = ""):
         group["next_run"] = cron.next_run(group["cron_expr"]) if group.get("enabled") and not group["is_expired"] else None
         if queued and group["id"] == queued:
             group["has_running_run"] = 1
-    return templates.TemplateResponse(request, "index.html", {"request": request, "jobs": jobs, "groups": groups})
+    return templates.TemplateResponse(
+        request,
+        "index.html",
+        {"request": request, "jobs": jobs, "groups": groups, "pause_status": governance.pause_status()},
+    )
 
 
 @app.get("/jobs/new", dependencies=[Depends(require_auth)])
@@ -864,6 +879,7 @@ def manual_group_run(
     group = db.get_group(group_id)
     if group is None:
         raise HTTPException(status_code=404, detail="Group not found")
+    ensure_execution_allowed(group, "Group")
     try:
         command = run_users.manual_runner_command("--group-id", group_id, group.get("run_user"))
     except run_users.RunUserError as exc:
@@ -1112,6 +1128,7 @@ def manual_run(
     job = db.get_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
+    ensure_execution_allowed(job, "Job")
     try:
         command = run_users.manual_runner_command("--job-id", job_id, job.get("run_user"))
     except run_users.RunUserError as exc:
@@ -1166,6 +1183,7 @@ def cron_preview(request: Request):
             "error": error,
             "cron_file": str(config.CRON_FILE),
             "cron_status": status_info,
+            "pause_status": governance.pause_status(),
         },
     )
 

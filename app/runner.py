@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import approved_skills, config, cron, db, pi_models, retention, work_window
+from . import approved_skills, config, cron, db, governance, pi_models, retention, work_window
 
 
 class RunnerConfigError(ValueError):
@@ -405,6 +405,12 @@ def run_job(job_id: str, source: str = "auto") -> int:
     job = db.get_job(job_id)
     if job is None:
         return 1
+    if governance.is_paused():
+        create_terminal_run(job_id, "disabled", "", "Scheduler is globally paused", source)
+        return 0
+    if governance.is_target_expired(job):
+        create_terminal_run(job_id, "disabled", "", "Job is expired", source)
+        return 0
 
     result = execute_job(job, source=source, apply_job_schedule_guards=True)
     return result.exit_code
@@ -444,6 +450,12 @@ def run_group(group_id: str, source: str = "auto") -> int:
     group = db.get_group_with_members(group_id)
     if group is None:
         return 1
+    if governance.is_paused():
+        create_terminal_group_run(group_id, "disabled", "Scheduler is globally paused", source)
+        return 0
+    if governance.is_target_expired(group):
+        create_terminal_group_run(group_id, "disabled", "Group is expired", source)
+        return 0
 
     manual = source == "manual"
     if not manual and not int(group.get("enabled", 0)):

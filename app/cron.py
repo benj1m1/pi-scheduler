@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 from croniter import croniter
 
-from . import config, db, run_users
+from . import config, db, governance, run_users
 
 
 BEIJING_TZ = ZoneInfo("Asia/Shanghai")
@@ -89,8 +89,16 @@ def render_cron_file(jobs: list[dict] | None = None, groups: list[dict] | None =
         "",
     ]
 
+    if governance.is_paused():
+        status = governance.pause_status()
+        lines.append(f"# pi-scheduler is globally paused: {status.get('reason', '')}")
+        lines.append("")
+        return "\n".join(lines)
+
     for job in jobs:
         if job.get("deleted_at") or not int(job.get("enabled", 0)):
+            continue
+        if governance.is_target_expired(job):
             continue
         validate_cron_expr(job["cron_expr"])
         run_user = run_users.effective_run_user(job.get("run_user"))
@@ -101,6 +109,8 @@ def render_cron_file(jobs: list[dict] | None = None, groups: list[dict] | None =
 
     for group in groups:
         if group.get("deleted_at") or not int(group.get("enabled", 0)):
+            continue
+        if governance.is_target_expired(group):
             continue
         validate_cron_expr(group["cron_expr"])
         run_user = run_users.effective_run_user(group.get("run_user"))

@@ -13,6 +13,12 @@
   </div>
 </section>
 
+{% if pause_status.paused %}
+<section class="banner warning-banner">
+  <strong>Scheduler paused.</strong> {{ pause_status.reason }}
+</section>
+{% endif %}
+
 {% if groups %}
 <section class="panel dashboard-section">
   <div class="section-head">

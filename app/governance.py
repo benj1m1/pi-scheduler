@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import uuid
 from datetime import date, datetime
 from typing import Any
@@ -55,7 +56,10 @@ def is_target_expired(target: dict[str, Any]) -> bool:
 
 def get_setting(key: str, default: str = "") -> str:
     with db.connect() as conn:
-        row = conn.execute("select value from app_settings where key = ?", (key,)).fetchone()
+        try:
+            row = conn.execute("select value from app_settings where key = ?", (key,)).fetchone()
+        except sqlite3.OperationalError:
+            return default
         return row["value"] if row else default
 
 

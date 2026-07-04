@@ -1441,6 +1441,62 @@ def test_db_persists_group_run_user(tmp_path, monkeypatch):
     assert db.list_groups_for_cron()[0]["run_user"] == "root"
 
 
+def test_render_cron_file_omits_entries_when_globally_paused(tmp_path, monkeypatch):
+    from app import governance
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+    monkeypatch.setattr(config, "ALLOWED_RUN_USERS", "root", raising=False)
+    monkeypatch.setattr(config, "CRON_USER", "root")
+
+    db.init_db()
+    governance.pause("admin", "maintenance")
+    content = cron.render_cron_file(
+        jobs=[{"id": "agent", "cron_expr": "*/5 * * * *", "enabled": 1, "deleted_at": None, "run_user": None}],
+        groups=[],
+    )
+
+    assert "pi-scheduler is globally paused" in content
+    assert "--job-id agent" not in content
+
+
+def test_render_cron_file_omits_expired_targets(monkeypatch):
+    from datetime import date
+    from app import governance
+
+    monkeypatch.setattr(governance, "beijing_today", lambda: date(2026, 7, 5))
+    content = cron.render_cron_file(
+        jobs=[{"id": "agent", "cron_expr": "*/5 * * * *", "enabled": 1, "deleted_at": None, "run_user": None, "expires_at": "2026-07-04"}],
+        groups=[{"id": "flow", "cron_expr": "*/10 * * * *", "enabled": 1, "deleted_at": None, "run_user": None, "expires_at": "2026-07-04"}],
+    )
+
+    assert "--job-id agent" not in content
+    assert "--group-id flow" not in content
+
+
+def test_manual_run_blocked_when_paused(tmp_path, monkeypatch):
+    from app import governance
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    db.init_db()
+    job_id = db.create_job({"name": "agent", "skill_name": "general", "task_prompt": "check", "cron_expr": "*/5 * * * *"})
+    governance.pause("admin", "maintenance")
+
+    try:
+        web.manual_run(job_id, web.BackgroundTasks())
+    except web.HTTPException as exc:
+        assert exc.status_code == 400
+        assert "paused" in str(exc.detail).lower()
+    else:
+        raise AssertionError("Expected paused manual run to be blocked")
+
+
 def test_render_cron_file_uses_job_and_group_run_users(monkeypatch):
     from app import run_users
 
