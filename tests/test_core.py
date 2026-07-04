@@ -610,6 +610,103 @@ def test_render_cron_file_adds_discovered_pi_node_bin_to_path(tmp_path, monkeypa
     assert path_line.index(str(pi_bin)) < path_line.index("/usr/local/bin")
 
 
+def test_db_persists_job_run_user(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "agent",
+            "skill_name": "general",
+            "task_prompt": "run agent",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+            "run_user": "piagent",
+        }
+    )
+
+    assert db.get_job(job_id)["run_user"] == "piagent"
+
+    db.update_job(
+        job_id,
+        {
+            "name": "agent",
+            "skill_name": "general",
+            "task_prompt": "run agent again",
+            "cron_expr": "*/10 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+            "run_user": "root",
+        },
+    )
+
+    assert db.get_job(job_id)["run_user"] == "root"
+    assert db.list_jobs_for_cron()[0]["run_user"] == "root"
+
+
+def test_db_persists_group_run_user(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "agent",
+            "skill_name": "general",
+            "task_prompt": "run agent",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+        }
+    )
+    group_id = db.create_group(
+        {"name": "flow", "cron_expr": "*/10 * * * *", "enabled": 1, "run_user": "piagent"},
+        [job_id],
+    )
+
+    assert db.get_group(group_id)["run_user"] == "piagent"
+
+    db.update_group(
+        group_id,
+        {"name": "flow", "cron_expr": "*/15 * * * *", "enabled": 1, "run_user": "root"},
+        [job_id],
+    )
+
+    assert db.get_group(group_id)["run_user"] == "root"
+    assert db.list_groups_for_cron()[0]["run_user"] == "root"
+
+
+def test_render_cron_file_uses_job_and_group_run_users(monkeypatch):
+    from app import run_users
+
+    monkeypatch.setattr(config, "CRON_USER", "root")
+    monkeypatch.setattr(config, "ALLOWED_RUN_USERS", "root,piagent", raising=False)
+    monkeypatch.setattr(run_users.pwd, "getpwnam", lambda name: object())
+
+    content = cron.render_cron_file(
+        [
+            {"id": "default-job", "cron_expr": "*/5 * * * *", "enabled": 1, "deleted_at": None, "run_user": None},
+            {"id": "user-job", "cron_expr": "0 * * * *", "enabled": 1, "deleted_at": None, "run_user": "piagent"},
+        ],
+        [
+            {"id": "user-group", "cron_expr": "*/30 * * * *", "enabled": 1, "deleted_at": None, "run_user": "piagent"},
+        ],
+    )
+
+    assert "*/5 * * * * root " in content
+    assert "0 * * * * piagent " in content
+    assert "*/30 * * * * piagent " in content
+
+
 def test_render_cron_file():
     content = cron.render_cron_file(
         [

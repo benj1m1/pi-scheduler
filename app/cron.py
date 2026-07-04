@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 from croniter import croniter
 
-from . import config, db
+from . import config, db, run_users
 
 
 BEIJING_TZ = ZoneInfo("Asia/Shanghai")
@@ -93,16 +93,20 @@ def render_cron_file(jobs: list[dict] | None = None, groups: list[dict] | None =
         if job.get("deleted_at") or not int(job.get("enabled", 0)):
             continue
         validate_cron_expr(job["cron_expr"])
+        run_user = run_users.effective_run_user(job.get("run_user"))
+        run_users.validate_run_user(job.get("run_user"))
         lines.append(
-            f"{job['cron_expr']} {config.CRON_USER} {config.RUNNER_PATH} --job-id {job['id']}"
+            f"{job['cron_expr']} {run_user} {config.RUNNER_PATH} --job-id {job['id']}"
         )
 
     for group in groups:
         if group.get("deleted_at") or not int(group.get("enabled", 0)):
             continue
         validate_cron_expr(group["cron_expr"])
+        run_user = run_users.effective_run_user(group.get("run_user"))
+        run_users.validate_run_user(group.get("run_user"))
         lines.append(
-            f"{group['cron_expr']} {config.CRON_USER} {config.RUNNER_PATH} --group-id {group['id']}"
+            f"{group['cron_expr']} {run_user} {config.RUNNER_PATH} --group-id {group['id']}"
         )
 
     lines.append("")

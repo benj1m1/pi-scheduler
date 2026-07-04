@@ -37,6 +37,7 @@ def init_db() -> None:
               output_mode text not null default 'summary',
               session_mode text not null default 'no_session',
               tool_mode text not null default 'full',
+              run_user text,
               created_at text not null,
               updated_at text not null,
               deleted_at text
@@ -67,6 +68,7 @@ def init_db() -> None:
               enabled integer not null default 1,
               prevent_overlap integer not null default 1,
               continue_on_failure integer not null default 0,
+              run_user text,
               work_start text,
               work_end text,
               created_at text not null,
@@ -141,6 +143,8 @@ def init_db() -> None:
             conn.execute("alter table jobs add column session_mode text not null default 'save'")
         if "tool_mode" not in columns:
             conn.execute("alter table jobs add column tool_mode text not null default 'full'")
+        if "run_user" not in columns:
+            conn.execute("alter table jobs add column run_user text")
         run_columns = {row[1] for row in conn.execute("pragma table_info(runs)").fetchall()}
         if "source" not in run_columns:
             conn.execute("alter table runs add column source text not null default 'auto'")
@@ -152,6 +156,8 @@ def init_db() -> None:
         group_columns = {row[1] for row in conn.execute("pragma table_info(job_groups)").fetchall()}
         if "continue_on_failure" not in group_columns:
             conn.execute("alter table job_groups add column continue_on_failure integer not null default 0")
+        if "run_user" not in group_columns:
+            conn.execute("alter table job_groups add column run_user text")
         conn.execute("update jobs set prevent_overlap = 1 where prevent_overlap != 1")
         conn.execute("update job_groups set prevent_overlap = 1 where prevent_overlap != 1")
 
@@ -215,7 +221,7 @@ def list_jobs_for_cron() -> list[dict[str, Any]]:
     with connect() as conn:
         rows = conn.execute(
             """
-            select id, cron_expr, enabled, deleted_at
+            select id, cron_expr, enabled, deleted_at, run_user
             from jobs
             where deleted_at is null
             order by created_at desc
@@ -228,7 +234,7 @@ def list_groups_for_cron() -> list[dict[str, Any]]:
     with connect() as conn:
         rows = conn.execute(
             """
-            select id, cron_expr, enabled, deleted_at
+            select id, cron_expr, enabled, deleted_at, run_user
             from job_groups
             where deleted_at is null
             order by created_at desc
@@ -280,8 +286,8 @@ def create_job(data: dict[str, Any]) -> str:
             insert into jobs (
               id, name, skill_name, task_prompt, cron_expr, provider_name, model_id, enabled,
               work_start, work_end, timeout_seconds, prevent_overlap, output_mode, session_mode,
-              tool_mode, created_at, updated_at
-            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              tool_mode, run_user, created_at, updated_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 job_id,
@@ -299,6 +305,7 @@ def create_job(data: dict[str, Any]) -> str:
                 data.get("output_mode", "summary"),
                 data.get("session_mode", "no_session"),
                 data.get("tool_mode", "full"),
+                data.get("run_user"),
                 now,
                 now,
             ),
@@ -314,7 +321,7 @@ def update_job(job_id: str, data: dict[str, Any]) -> None:
             set name = ?, skill_name = ?, task_prompt = ?, cron_expr = ?, enabled = ?,
                 provider_name = ?, model_id = ?, work_start = ?, work_end = ?,
                 timeout_seconds = ?, prevent_overlap = ?, output_mode = ?, session_mode = ?,
-                tool_mode = ?, updated_at = ?
+                tool_mode = ?, run_user = ?, updated_at = ?
             where id = ? and deleted_at is null
             """,
             (
@@ -332,6 +339,7 @@ def update_job(job_id: str, data: dict[str, Any]) -> None:
                 data.get("output_mode", "summary"),
                 data.get("session_mode", "no_session"),
                 data.get("tool_mode", "full"),
+                data.get("run_user"),
                 utc_now(),
                 job_id,
             ),
@@ -455,8 +463,8 @@ def create_group(data: dict[str, Any], member_job_ids: list[str]) -> str:
             """
             insert into job_groups (
               id, name, cron_expr, enabled, prevent_overlap, continue_on_failure,
-              work_start, work_end, created_at, updated_at
-            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              run_user, work_start, work_end, created_at, updated_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 group_id,
@@ -465,6 +473,7 @@ def create_group(data: dict[str, Any], member_job_ids: list[str]) -> str:
                 int(data.get("enabled", 1)),
                 1,
                 int(data.get("continue_on_failure", 0)),
+                data.get("run_user"),
                 data.get("work_start"),
                 data.get("work_end"),
                 now,
@@ -490,7 +499,7 @@ def update_group(group_id: str, data: dict[str, Any], member_job_ids: list[str])
             """
             update job_groups
             set name = ?, cron_expr = ?, enabled = ?, prevent_overlap = ?, continue_on_failure = ?,
-                work_start = ?, work_end = ?, updated_at = ?
+                run_user = ?, work_start = ?, work_end = ?, updated_at = ?
             where id = ? and deleted_at is null
             """,
             (
@@ -499,6 +508,7 @@ def update_group(group_id: str, data: dict[str, Any], member_job_ids: list[str])
                 int(data.get("enabled", 0)),
                 1,
                 int(data.get("continue_on_failure", 0)),
+                data.get("run_user"),
                 data.get("work_start"),
                 data.get("work_end"),
                 now,
