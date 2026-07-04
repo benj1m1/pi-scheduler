@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import grp
 import logging
+import os
 import pwd
+import shutil
+import stat
+import subprocess
 from pathlib import Path
 
 from . import config, run_users
@@ -23,10 +28,44 @@ def expected_models_path(user: str | None = None) -> Path:
     return home / ".pi" / "agent" / "models.json"
 
 
+def runtime_directories() -> list[Path]:
+    return [config.DATA_DIR, config.LOG_DIR, config.LOCK_DIR, config.SCHEDULER_HOME / "tmp"]
+
+
+def _user_group_ids(user_info) -> set[int]:
+    group_ids = {user_info.pw_gid}
+    for group in grp.getgrall():
+        if user_info.pw_name in group.gr_mem:
+            group_ids.add(group.gr_gid)
+    return group_ids
+
+
+def _mode_allows_write(user_info, path: Path) -> bool:
+    mode = path.stat().st_mode
+    if path.stat().st_uid == user_info.pw_uid:
+        return bool(mode & stat.S_IWUSR)
+    if path.stat().st_gid in _user_group_ids(user_info):
+        return bool(mode & stat.S_IWGRP)
+    return bool(mode & stat.S_IWOTH)
+
+
+def _can_write_as_runtime_user(user_info, path: Path) -> bool:
+    runuser = shutil.which("runuser")
+    if os.geteuid() == 0 and runuser:
+        result = subprocess.run(
+            [runuser, "-u", user_info.pw_name, "--", "test", "-w", str(path)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        return result.returncode == 0
+    return _mode_allows_write(user_info, path)
+
+
 def check_runtime_setup() -> list[str]:
     warnings: list[str] = []
     try:
-        pwd.getpwnam(config.RUNTIME_USER)
+        user_info = pwd.getpwnam(config.RUNTIME_USER)
     except KeyError:
         warnings.append(f"Runtime user '{config.RUNTIME_USER}' does not exist. {setup_hint()}")
         return warnings
@@ -36,6 +75,14 @@ def check_runtime_setup() -> list[str]:
         warnings.append(
             f"Runtime user '{config.RUNTIME_USER}' is not in PI_SCHEDULER_ALLOWED_RUN_USERS ({', '.join(allowed)})."
         )
+
+    for directory in runtime_directories():
+        if not directory.exists():
+            warnings.append(f"Runtime directory is missing: {directory}. {setup_hint()}")
+        elif not directory.is_dir():
+            warnings.append(f"Runtime path is not a directory: {directory}. {setup_hint()}")
+        elif not _can_write_as_runtime_user(user_info, directory):
+            warnings.append(f"Runtime user '{config.RUNTIME_USER}' cannot write to {directory}. {setup_hint()}")
 
     models_path = expected_models_path(config.RUNTIME_USER)
     if not models_path.exists():

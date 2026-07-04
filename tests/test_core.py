@@ -803,7 +803,7 @@ def test_runner_cli_accepts_manual_source(monkeypatch):
     assert calls == [("job-a", "manual")]
 
 
-def test_runtime_setup_accepts_valid_mocked_setup(tmp_path, monkeypatch):
+def test_runtime_setup_reports_missing_runtime_directory(tmp_path, monkeypatch):
     from app import runtime_setup
 
     models = tmp_path / "home" / "pi-scheduler-agent" / ".pi" / "agent" / "models.json"
@@ -812,11 +812,49 @@ def test_runtime_setup_accepts_valid_mocked_setup(tmp_path, monkeypatch):
 
     class Pw:
         pw_dir = str(tmp_path / "home" / "pi-scheduler-agent")
+        pw_uid = 1002
+        pw_gid = 1003
+        pw_name = "pi-scheduler-agent"
 
     monkeypatch.setattr(config, "RUNTIME_USER", "pi-scheduler-agent")
     monkeypatch.setattr(config, "ALLOWED_RUN_USERS", "root,pi-scheduler-agent", raising=False)
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "missing-data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "SCHEDULER_HOME", tmp_path)
     monkeypatch.setattr(runtime_setup.pwd, "getpwnam", lambda name: Pw())
     monkeypatch.setattr(runtime_setup.pwd, "getpwuid", lambda uid: type("Owner", (), {"pw_name": "pi-scheduler-agent"})())
+
+    warnings = runtime_setup.check_runtime_setup()
+
+    assert any("Runtime directory is missing" in warning for warning in warnings)
+    assert any(str(tmp_path / "missing-data") in warning for warning in warnings)
+
+
+def test_runtime_setup_accepts_valid_mocked_setup(tmp_path, monkeypatch):
+    from app import runtime_setup
+
+    models = tmp_path / "home" / "pi-scheduler-agent" / ".pi" / "agent" / "models.json"
+    models.parent.mkdir(parents=True)
+    models.write_text('{"providers": []}', encoding="utf-8")
+    for dirname in ["data", "logs", "locks", "tmp"]:
+        (tmp_path / dirname).mkdir()
+
+    class Pw:
+        pw_dir = str(tmp_path / "home" / "pi-scheduler-agent")
+        pw_uid = 1002
+        pw_gid = 1003
+        pw_name = "pi-scheduler-agent"
+
+    monkeypatch.setattr(config, "RUNTIME_USER", "pi-scheduler-agent")
+    monkeypatch.setattr(config, "ALLOWED_RUN_USERS", "root,pi-scheduler-agent", raising=False)
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "SCHEDULER_HOME", tmp_path)
+    monkeypatch.setattr(runtime_setup.pwd, "getpwnam", lambda name: Pw())
+    monkeypatch.setattr(runtime_setup.pwd, "getpwuid", lambda uid: type("Owner", (), {"pw_name": "pi-scheduler-agent"})())
+    monkeypatch.setattr(runtime_setup, "_can_write_as_runtime_user", lambda user_info, path: True)
 
     assert runtime_setup.check_runtime_setup() == []
 
