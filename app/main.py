@@ -14,7 +14,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import approved_skills, config, cron, cron_status, db, pi_models, retention, runner, run_users, runtime_setup, work_window
+from . import approved_skills, config, cron, cron_status, db, governance, pi_models, retention, runner, run_users, runtime_setup, work_window
 
 
 app = FastAPI(title="Pi Scheduler")
@@ -41,6 +41,13 @@ OUTPUT_MODES = {"summary", "events"}
 SESSION_MODES = {"save", "no_session"}
 TOOL_MODES = {"full", "read_only", "no_tools"}
 SKILLS_MODES = {"none", "approved", "runtime"}
+
+
+def governance_options() -> dict[str, list[str]]:
+    return {
+        "environment_options": sorted(governance.ENVIRONMENTS),
+        "risk_level_options": ["low", "medium", "high"],
+    }
 
 
 def hour_options() -> list[dict[str, str]]:
@@ -263,6 +270,7 @@ def validate_job_form(data: dict) -> list[str]:
         work_window.validate(data.get("work_start"), data.get("work_end"))
     except ValueError as exc:
         errors.append(str(exc))
+    errors.extend(governance.validate_metadata(data))
     try:
         run_users.validate_run_user(data.get("run_user"))
     except run_users.RunUserError as exc:
@@ -310,6 +318,13 @@ def form_data(
     prevent_overlap: str | None,
     skills_mode: str = "none",
     skill_ids: str | list[str] | None = None,
+    *,
+    owner: str = "",
+    purpose: str = "",
+    scope: str = "",
+    environment: str = "local",
+    risk_level: str = "low",
+    expires_at: str = "",
 ) -> dict:
     cron_expr = ""
     schedule_error = None
@@ -347,6 +362,12 @@ def form_data(
         "work_end": work_end.strip() or None,
         "timeout_seconds": timeout_seconds.strip(),
         "run_user": run_user.strip() or None,
+        "owner": owner.strip(),
+        "purpose": purpose.strip(),
+        "scope": scope.strip(),
+        "environment": environment,
+        "risk_level": risk_level,
+        "expires_at": expires_at.strip() or None,
         "enabled": parse_bool(enabled),
         "prevent_overlap": 1,
     }
@@ -370,6 +391,13 @@ def with_schedule(job: dict) -> dict:
     job["skill_ids"] = job.get("skill_ids") or ""
     job["skill_paths"] = job.get("skill_paths") or ""
     job["run_user"] = job.get("run_user") or ""
+    job["owner"] = job.get("owner") or ""
+    job["purpose"] = job.get("purpose") or ""
+    job["scope"] = job.get("scope") or ""
+    job["environment"] = job.get("environment") or "local"
+    job["risk_level"] = job.get("risk_level") or "low"
+    job["expires_at"] = job.get("expires_at") or ""
+    job["is_expired"] = governance.is_target_expired(job)
     return job
 
 
@@ -404,6 +432,7 @@ def job_form_context(request: Request, job: dict, errors: list[str], action: str
         "approved_skills": catalog,
         "selected_skill_ids": selected_skill_ids,
         "missing_skill_ids": missing_skill_ids,
+        **governance_options(),
     }
 
 
@@ -417,6 +446,13 @@ def group_form_data(
     enabled: str | None,
     continue_on_failure: str | None,
     member_job_ids: list[str] | None,
+    *,
+    owner: str = "",
+    purpose: str = "",
+    scope: str = "",
+    environment: str = "local",
+    risk_level: str = "low",
+    expires_at: str = "",
 ) -> dict:
     cron_expr = ""
     schedule_error = None
@@ -434,6 +470,12 @@ def group_form_data(
         "work_start": work_start.strip() or None,
         "work_end": work_end.strip() or None,
         "run_user": run_user.strip() or None,
+        "owner": owner.strip(),
+        "purpose": purpose.strip(),
+        "scope": scope.strip(),
+        "environment": environment,
+        "risk_level": risk_level,
+        "expires_at": expires_at.strip() or None,
         "enabled": parse_bool(enabled),
         "prevent_overlap": 1,
         "continue_on_failure": parse_bool(continue_on_failure),
@@ -456,6 +498,7 @@ def validate_group_form(data: dict) -> list[str]:
         work_window.validate(data.get("work_start"), data.get("work_end"))
     except ValueError as exc:
         errors.append(str(exc))
+    errors.extend(governance.validate_metadata(data))
     try:
         run_users.validate_run_user(data.get("run_user"))
     except run_users.RunUserError as exc:
@@ -479,6 +522,13 @@ def with_group_schedule(group: dict) -> dict:
     group["work_start"] = group.get("work_start") or ""
     group["work_end"] = group.get("work_end") or ""
     group["run_user"] = group.get("run_user") or ""
+    group["owner"] = group.get("owner") or ""
+    group["purpose"] = group.get("purpose") or ""
+    group["scope"] = group.get("scope") or ""
+    group["environment"] = group.get("environment") or "local"
+    group["risk_level"] = group.get("risk_level") or "low"
+    group["expires_at"] = group.get("expires_at") or ""
+    group["is_expired"] = governance.is_target_expired(group)
     group["continue_on_failure"] = int(group.get("continue_on_failure", 0))
     group["member_job_ids"] = [member["job_id"] for member in group.get("members", [])]
     return group
@@ -497,6 +547,7 @@ def group_form_context(request: Request, group: dict, errors: list[str], action:
         "hour_options": hour_options(),
         "allowed_run_users": selectable_run_users(),
         "default_run_user": config.CRON_USER,
+        **governance_options(),
     }
 
 
@@ -505,11 +556,13 @@ def index(request: Request, queued: str = ""):
     jobs = db.list_jobs()
     groups = db.list_groups()
     for job in jobs:
-        job["next_run"] = cron.next_run(job["cron_expr"]) if job.get("enabled") else None
+        job["is_expired"] = governance.is_target_expired(job)
+        job["next_run"] = cron.next_run(job["cron_expr"]) if job.get("enabled") and not job["is_expired"] else None
         if queued and job["id"] == queued:
             job["has_running_run"] = 1
     for group in groups:
-        group["next_run"] = cron.next_run(group["cron_expr"]) if group.get("enabled") else None
+        group["is_expired"] = governance.is_target_expired(group)
+        group["next_run"] = cron.next_run(group["cron_expr"]) if group.get("enabled") and not group["is_expired"] else None
         if queued and group["id"] == queued:
             group["has_running_run"] = 1
     return templates.TemplateResponse(request, "index.html", {"request": request, "jobs": jobs, "groups": groups})
@@ -538,6 +591,12 @@ def new_job(request: Request):
         "skill_ids": "",
         "skill_paths": "",
         "run_user": "",
+        "owner": "",
+        "purpose": "",
+        "scope": "",
+        "environment": "local",
+        "risk_level": "low",
+        "expires_at": "",
     }
     return templates.TemplateResponse(
         request,
@@ -565,6 +624,12 @@ def create_job(
     run_user: Annotated[str, Form()] = "",
     enabled: Annotated[str | None, Form()] = None,
     prevent_overlap: Annotated[str | None, Form()] = None,
+    owner: Annotated[str, Form()] = "",
+    purpose: Annotated[str, Form()] = "",
+    scope: Annotated[str, Form()] = "",
+    environment: Annotated[str, Form()] = "local",
+    risk_level: Annotated[str, Form()] = "low",
+    expires_at: Annotated[str, Form()] = "",
 ):
     data = form_data(
         name,
@@ -583,6 +648,12 @@ def create_job(
         prevent_overlap,
         skills_mode,
         skill_ids,
+        owner=owner,
+        purpose=purpose,
+        scope=scope,
+        environment=environment,
+        risk_level=risk_level,
+        expires_at=expires_at,
     )
     errors = validate_job_form(data)
     if errors:
@@ -611,6 +682,12 @@ def new_group(request: Request):
         "prevent_overlap": 1,
         "continue_on_failure": 0,
         "run_user": "",
+        "owner": "",
+        "purpose": "",
+        "scope": "",
+        "environment": "local",
+        "risk_level": "low",
+        "expires_at": "",
         "member_job_ids": [],
     }
     return templates.TemplateResponse(
@@ -632,6 +709,12 @@ def create_group(
     enabled: Annotated[str | None, Form()] = None,
     continue_on_failure: Annotated[str | None, Form()] = None,
     member_job_ids: Annotated[list[str] | None, Form()] = None,
+    owner: Annotated[str, Form()] = "",
+    purpose: Annotated[str, Form()] = "",
+    scope: Annotated[str, Form()] = "",
+    environment: Annotated[str, Form()] = "local",
+    risk_level: Annotated[str, Form()] = "low",
+    expires_at: Annotated[str, Form()] = "",
 ):
     data = group_form_data(
         name,
@@ -643,6 +726,12 @@ def create_group(
         enabled,
         continue_on_failure,
         member_job_ids,
+        owner=owner,
+        purpose=purpose,
+        scope=scope,
+        environment=environment,
+        risk_level=risk_level,
+        expires_at=expires_at,
     )
     errors = validate_group_form(data)
     if errors:
@@ -666,6 +755,7 @@ def group_detail(
     group = db.get_group_with_members(group_id)
     if group is None:
         raise HTTPException(status_code=404, detail="Group not found")
+    group["is_expired"] = governance.is_target_expired(group)
     runs = db.list_group_runs(group_id, RUNS_PER_PAGE)
     return templates.TemplateResponse(
         request,
@@ -704,6 +794,12 @@ def update_group(
     enabled: Annotated[str | None, Form()] = None,
     continue_on_failure: Annotated[str | None, Form()] = None,
     member_job_ids: Annotated[list[str] | None, Form()] = None,
+    owner: Annotated[str, Form()] = "",
+    purpose: Annotated[str, Form()] = "",
+    scope: Annotated[str, Form()] = "",
+    environment: Annotated[str, Form()] = "local",
+    risk_level: Annotated[str, Form()] = "low",
+    expires_at: Annotated[str, Form()] = "",
 ):
     if db.get_group(group_id) is None:
         raise HTTPException(status_code=404, detail="Group not found")
@@ -717,6 +813,12 @@ def update_group(
         enabled,
         continue_on_failure,
         member_job_ids,
+        owner=owner,
+        purpose=purpose,
+        scope=scope,
+        environment=environment,
+        risk_level=risk_level,
+        expires_at=expires_at,
     )
     errors = validate_group_form(data)
     if errors:
@@ -802,6 +904,7 @@ def job_detail(
     if status_data is None:
         raise HTTPException(status_code=404, detail="Job not found")
     job = status_data["job"]
+    job["is_expired"] = governance.is_target_expired(job)
     command_error = None
     try:
         command = runner.build_command(job)[1]
@@ -928,6 +1031,12 @@ def update_job(
     run_user: Annotated[str, Form()] = "",
     enabled: Annotated[str | None, Form()] = None,
     prevent_overlap: Annotated[str | None, Form()] = None,
+    owner: Annotated[str, Form()] = "",
+    purpose: Annotated[str, Form()] = "",
+    scope: Annotated[str, Form()] = "",
+    environment: Annotated[str, Form()] = "local",
+    risk_level: Annotated[str, Form()] = "low",
+    expires_at: Annotated[str, Form()] = "",
 ):
     if db.get_job(job_id) is None:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -948,6 +1057,12 @@ def update_job(
         prevent_overlap,
         skills_mode,
         skill_ids,
+        owner=owner,
+        purpose=purpose,
+        scope=scope,
+        environment=environment,
+        risk_level=risk_level,
+        expires_at=expires_at,
     )
     errors = validate_job_form(data)
     if errors:

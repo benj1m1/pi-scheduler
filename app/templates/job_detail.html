@@ -26,6 +26,12 @@
     <dt>Skills</dt><dd>{{ job|describe_job_skills }}</dd>
     <dt>Schedule</dt><dd>{{ job.cron_expr|describe_cron }}</dd>
     <dt>Work window</dt><dd>{{ job.work_start|describe_work_window(job.work_end) }}</dd>
+    <dt>Owner</dt><dd>{{ job.owner or 'Not documented' }}</dd>
+    <dt>Purpose</dt><dd>{{ job.purpose or 'Not documented' }}</dd>
+    <dt>Scope</dt><dd>{{ job.scope or 'Not documented' }}</dd>
+    <dt>Environment</dt><dd>{{ job.environment }}</dd>
+    <dt>Risk</dt><dd>{{ job.risk_level }}</dd>
+    <dt>Expires</dt><dd>{{ job.expires_at or 'Never' }}{% if job.is_expired %} <span class="badge bad">expired</span>{% endif %}</dd>
     <dt>Run as</dt><dd>{{ job.run_user|describe_run_user }}</dd>
     <dt>Cron</dt><dd><code>{{ job.cron_expr }}</code></dd>
     <dt>Command</dt>

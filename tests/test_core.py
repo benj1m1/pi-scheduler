@@ -134,6 +134,100 @@ def test_database_persists_skill_ids(tmp_path, monkeypatch):
     assert job["skill_ids"] == "pdf\nobsidian-markdown"
 
 
+def test_job_form_data_includes_governance_metadata(monkeypatch):
+    data = web.form_data(
+        "agent",
+        "check logs",
+        "5",
+        "minutes",
+        "",
+        "summary",
+        "no_session",
+        "full",
+        "",
+        "",
+        "240",
+        "",
+        "on",
+        None,
+        "none",
+        "",
+        owner="Ben",
+        purpose="Monitor logs",
+        scope="/opt/app only",
+        environment="dev",
+        risk_level="medium",
+        expires_at="2026-07-04",
+    )
+
+    assert data["owner"] == "Ben"
+    assert data["purpose"] == "Monitor logs"
+    assert data["scope"] == "/opt/app only"
+    assert data["environment"] == "dev"
+    assert data["risk_level"] == "medium"
+    assert data["expires_at"] == "2026-07-04"
+    assert web.validate_job_form(data) == []
+
+
+def test_group_form_data_includes_governance_metadata():
+    data = web.group_form_data(
+        "flow",
+        "5",
+        "minutes",
+        "",
+        "",
+        "",
+        "on",
+        None,
+        ["job-a"],
+        owner="Ben",
+        purpose="Review chain",
+        scope="local repo",
+        environment="staging",
+        risk_level="high",
+        expires_at="2026-07-04",
+    )
+
+    assert data["owner"] == "Ben"
+    assert data["purpose"] == "Review chain"
+    assert data["scope"] == "local repo"
+    assert data["environment"] == "staging"
+    assert data["risk_level"] == "high"
+    assert data["expires_at"] == "2026-07-04"
+
+
+def test_validate_job_form_rejects_invalid_governance_metadata():
+    data = web.form_data(
+        "agent",
+        "check logs",
+        "5",
+        "minutes",
+        "",
+        "summary",
+        "no_session",
+        "full",
+        "",
+        "",
+        "240",
+        "",
+        "on",
+        None,
+        "none",
+        "",
+        owner="",
+        purpose="",
+        scope="",
+        environment="invalid",
+        risk_level="critical",
+        expires_at="2026/07/04",
+    )
+
+    errors = web.validate_job_form(data)
+    assert "Environment is invalid" in errors
+    assert "Risk level is invalid" in errors
+    assert "Expiration date must use YYYY-MM-DD" in errors
+
+
 def test_job_form_data_includes_run_user(monkeypatch):
     from app import run_users
 

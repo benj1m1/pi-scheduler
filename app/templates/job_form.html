@@ -131,6 +131,28 @@
       <p class="hint">Uses Beijing time. Leave both as All day for no work-window limit. The start hour is included; the end hour is excluded.</p>
       <p id="work-window-status" class="window-status" aria-live="polite"></p>
     </fieldset>
+    <fieldset>
+      <legend>Governance</legend>
+      <label>Owner <input type="text" name="owner" value="{{ job.owner }}" placeholder="Human owner"></label>
+      <label>Purpose <textarea name="purpose" rows="2" placeholder="Why this automation exists">{{ job.purpose }}</textarea></label>
+      <label>Scope / boundaries <textarea name="scope" rows="2" placeholder="Allowed systems, data, and boundaries">{{ job.scope }}</textarea></label>
+      <label>Environment
+        <select name="environment" required>
+          {% for value in environment_options %}
+          <option value="{{ value }}" {% if job.environment == value %}selected{% endif %}>{{ value }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Risk level
+        <select name="risk_level" required>
+          {% for value in risk_level_options %}
+          <option value="{{ value }}" {% if job.risk_level == value %}selected{% endif %}>{{ value }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Expires at <input type="date" name="expires_at" value="{{ job.expires_at }}"></label>
+      <p class="hint">Expiration is checked using Beijing dates. Expired jobs do not execute.</p>
+    </fieldset>
     <label>Timeout seconds <input name="timeout_seconds" type="number" min="10" max="3600" value="{{ job.timeout_seconds }}" required></label>
     <label class="check"><input type="checkbox" name="enabled" {% if job.enabled %}checked{% endif %}> Enabled</label>
     <label class="check forced-check"><input type="checkbox" name="prevent_overlap" checked disabled> Prevent overlap</label>

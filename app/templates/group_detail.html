@@ -20,6 +20,12 @@
     </dd>
     <dt>Schedule</dt><dd>{{ group.cron_expr|describe_cron }}</dd>
     <dt>Work window</dt><dd>{{ group.work_start|describe_work_window(group.work_end) }}</dd>
+    <dt>Owner</dt><dd>{{ group.owner or 'Not documented' }}</dd>
+    <dt>Purpose</dt><dd>{{ group.purpose or 'Not documented' }}</dd>
+    <dt>Scope</dt><dd>{{ group.scope or 'Not documented' }}</dd>
+    <dt>Environment</dt><dd>{{ group.environment }}</dd>
+    <dt>Risk</dt><dd>{{ group.risk_level }}</dd>
+    <dt>Expires</dt><dd>{{ group.expires_at or 'Never' }}{% if group.is_expired %} <span class="badge bad">expired</span>{% endif %}</dd>
     <dt>Run as</dt><dd>{{ group.run_user|describe_run_user }}</dd>
     <dt>Cron</dt><dd><code>{{ group.cron_expr }}</code></dd>
     <dt>Overlap</dt><dd>{{ 'prevented' if group.prevent_overlap else 'allowed' }}</dd>
