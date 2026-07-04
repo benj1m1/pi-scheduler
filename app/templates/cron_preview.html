@@ -9,6 +9,31 @@
       <p class="hint">Target file: <code>{{ cron_file }}</code></p>
     </div>
   </div>
+  <div class="status-card">
+    <h2>Cron Status</h2>
+    <dl>
+      <dt>Configured target</dt><dd><code>{{ cron_status.target_file }}</code></dd>
+      <dt>Status</dt><dd><strong>{{ cron_status.status }}</strong></dd>
+      <dt>System cron path</dt><dd>{{ 'yes' if cron_status.is_system_cron_path else 'no' }}</dd>
+      <dt>File exists</dt><dd>{{ 'yes' if cron_status.file_exists else 'no' }}</dd>
+      <dt>Content matches preview</dt><dd>{{ cron_status.content_matches if cron_status.content_matches is not none else 'unknown' }}</dd>
+      <dt>Owner</dt><dd>{{ cron_status.file_owner or 'unknown' }}</dd>
+      <dt>Mode</dt><dd>{{ cron_status.file_mode or 'unknown' }}</dd>
+      <dt>Cron service active</dt><dd>{{ cron_status.cron_service_active if cron_status.cron_service_active is not none else 'unknown' }}</dd>
+    </dl>
+    {% if cron_status.warnings %}
+    <h3>Warnings</h3>
+    <ul>
+      {% for warning in cron_status.warnings %}<li>{{ warning }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+    {% if cron_status.recommendations %}
+    <h3>Recommended fixes</h3>
+    <ul>
+      {% for recommendation in cron_status.recommendations %}<li><code>{{ recommendation }}</code></li>{% endfor %}
+    </ul>
+    {% endif %}
+  </div>
   {% if error %}<div class="errors" role="alert"><p>{{ error }}</p></div>{% endif %}
   <pre class="log-box" tabindex="0" aria-label="Generated cron file">{{ content }}</pre>
 </section>

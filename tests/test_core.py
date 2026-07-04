@@ -2292,6 +2292,30 @@ def test_logs_page_lists_runs_with_filters_and_cleanup_controls(tmp_path, monkey
     assert "failed-run" not in html
 
 
+def test_cron_preview_displays_cron_status(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "CRON_FILE", tmp_path / "pi-agent-jobs")
+    monkeypatch.setattr(web.cron_status, "inspect", lambda content: {
+        "target_file": str(tmp_path / "pi-agent-jobs"),
+        "is_system_cron_path": False,
+        "file_exists": False,
+        "content_matches": None,
+        "file_mode": None,
+        "file_owner": None,
+        "cron_service_active": None,
+        "status": "preview_only",
+        "warnings": ["Target file is outside /etc/cron.d. System cron will not read this file automatically."],
+        "recommendations": ["For active system cron, set PI_SCHEDULER_CRON_FILE=/etc/cron.d/pi-agent-jobs before starting the app."],
+    })
+
+    response = web.cron_preview(Request({"type": "http", "method": "GET", "path": "/cron", "headers": []}))
+    html = response.body.decode()
+
+    assert "Cron Status" in html
+    assert "preview_only" in html
+    assert "outside /etc/cron.d" in html
+    assert "PI_SCHEDULER_CRON_FILE=/etc/cron.d/pi-agent-jobs" in html
+
+
 def test_maintenance_logs_redirects_to_logs():
     response = web.maintenance_logs()
 
