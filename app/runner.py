@@ -11,7 +11,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import config, cron, db, pi_models, retention, work_window
+from . import approved_skills, config, cron, db, pi_models, retention, work_window
+
+
+class RunnerConfigError(ValueError):
+    pass
 
 
 @dataclass
@@ -44,9 +48,8 @@ def skills_mode(job: dict) -> str:
     return value if value in {"approved", "runtime"} else "none"
 
 
-def skill_paths(job: dict) -> list[str]:
-    raw = str(job.get("skill_paths") or "")
-    return [line.strip() for line in raw.splitlines() if line.strip()]
+def skill_ids(job: dict) -> list[str]:
+    return approved_skills.parse_skill_ids(job.get("skill_ids"))
 
 
 def build_command(job: dict, validate_model: bool = True) -> tuple[list[str], str]:
@@ -56,8 +59,12 @@ def build_command(job: dict, validate_model: bool = True) -> tuple[list[str], st
     if selected_skills_mode in {"none", "approved"}:
         argv.append("--no-skills")
     if selected_skills_mode == "approved":
-        for path in skill_paths(job):
-            argv.extend(["--skill", path])
+        for skill_id in skill_ids(job):
+            try:
+                path = approved_skills.resolve_skill_path(skill_id)
+            except approved_skills.SkillCatalogError as exc:
+                raise RunnerConfigError(f"Approved skill {skill_id!r} is not available") from exc
+            argv.extend(["--skill", str(path)])
     if session_mode(job) == "no_session":
         argv.append("--no-session")
     selected_tool_mode = tool_mode(job)
@@ -214,6 +221,12 @@ def create_terminal_run(
 ) -> str:
     now = db.utc_now()
     run_id = new_run_id(job_id)
+    job_log_dir = config.LOG_DIR / "jobs" / job_id
+    runs_dir = job_log_dir / "runs"
+    stdout_path = runs_dir / f"{run_id}.stdout.log"
+    stderr_path = runs_dir / f"{run_id}.stderr.log"
+    write_text(stdout_path, "")
+    write_text(stderr_path, error_summary or "")
     db.insert_run(
         {
             "id": run_id,
@@ -225,6 +238,8 @@ def create_terminal_run(
             "status": status,
             "duration_ms": 0,
             "command": command,
+            "stdout_path": str(stdout_path),
+            "stderr_path": str(stderr_path),
             "error_summary": error_summary,
         }
     )
@@ -249,6 +264,10 @@ def execute_job(
         _, command_display = build_command(job)
     except pi_models.ModelConfigError as exc:
         _, command_display = build_command(job, validate_model=False)
+        run_id = create_terminal_run(job_id, "failed", command_display, str(exc), source, group_run_id)
+        return JobExecutionResult(run_id, "failed", 1, str(exc))
+    except RunnerConfigError as exc:
+        command_display = shlex.join([config.PI_BINARY, "<configuration-error>"])
         run_id = create_terminal_run(job_id, "failed", command_display, str(exc), source, group_run_id)
         return JobExecutionResult(run_id, "failed", 1, str(exc))
 

@@ -727,14 +727,21 @@ def test_build_command_disables_skills_by_default():
     assert "--no-skills" in display
 
 
-def test_build_command_loads_only_approved_skill_paths():
+def test_build_command_loads_only_approved_catalog_skills(tmp_path, monkeypatch):
+    root = tmp_path / "approved-skills"
+    (root / "pdf").mkdir(parents=True)
+    (root / "pdf" / "SKILL.md").write_text("---\nname: pdf\n---\n", encoding="utf-8")
+    (root / "obsidian-markdown").mkdir()
+    (root / "obsidian-markdown" / "SKILL.md").write_text("---\nname: obsidian-markdown\n---\n", encoding="utf-8")
+    monkeypatch.setattr(config, "APPROVED_SKILLS_DIR", root, raising=False)
+
     argv, display = runner.build_command(
         {
             "task_prompt": "summarize status",
             "output_mode": "summary",
             "session_mode": "no_session",
             "skills_mode": "approved",
-            "skill_paths": "/opt/pi-scheduler/skills/safe\n/home/pi-scheduler-agent/.pi/agent/approved-skills/pdf",
+            "skill_ids": "pdf\nobsidian-markdown",
         }
     )
 
@@ -742,14 +749,33 @@ def test_build_command_loads_only_approved_skill_paths():
         "pi",
         "--no-skills",
         "--skill",
-        "/opt/pi-scheduler/skills/safe",
+        str((root / "pdf").resolve()),
         "--skill",
-        "/home/pi-scheduler-agent/.pi/agent/approved-skills/pdf",
+        str((root / "obsidian-markdown").resolve()),
         "--no-session",
         "-p",
         "summarize status",
     ]
-    assert "--skill /opt/pi-scheduler/skills/safe" in display
+    assert f"--skill {root / 'pdf'}" in display
+
+
+def test_build_command_rejects_missing_approved_catalog_skill(tmp_path, monkeypatch):
+    root = tmp_path / "approved-skills"
+    root.mkdir()
+    monkeypatch.setattr(config, "APPROVED_SKILLS_DIR", root, raising=False)
+
+    try:
+        runner.build_command(
+            {
+                "task_prompt": "summarize status",
+                "skills_mode": "approved",
+                "skill_ids": "missing",
+            }
+        )
+    except runner.RunnerConfigError as exc:
+        assert "Approved skill 'missing' is not available" in str(exc)
+    else:
+        raise AssertionError("expected missing catalog skill to fail")
 
 
 def test_build_command_can_use_runtime_default_skills():
@@ -2129,6 +2155,50 @@ def test_events_mode_runs_json_and_writes_transcript_and_jsonl(tmp_path, monkeyp
     ]
     assert "final summary" in Path(run["stdout_path"]).read_text(encoding="utf-8")
     assert Path(run["jsonl_path"]).read_text(encoding="utf-8") == events
+
+
+def test_run_job_fails_safely_when_approved_skill_disappears(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+    monkeypatch.setattr(config, "CRON_FILE", tmp_path / "pi-agent-jobs")
+    root = tmp_path / "approved-skills"
+    root.mkdir()
+    monkeypatch.setattr(config, "APPROVED_SKILLS_DIR", root, raising=False)
+
+    called = {"run": False}
+
+    def fake_run(argv, **kwargs):
+        called["run"] = True
+        raise AssertionError("pi should not be invoked when skill resolution fails")
+
+    monkeypatch.setattr(runner.subprocess, "run", fake_run)
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "pi-agent",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+            "output_mode": "summary",
+            "session_mode": "no_session",
+            "skills_mode": "approved",
+            "skill_ids": "missing",
+        }
+    )
+
+    exit_code = runner.run_job(job_id)
+    run = db.get_run(db.list_recent_runs(job_id)[0]["id"])
+
+    assert exit_code == 1
+    assert called["run"] is False
+    assert run["status"] == "failed"
+    assert "Approved skill 'missing' is not available" in Path(run["stderr_path"]).read_text(encoding="utf-8")
 
 
 def test_recent_runs_ignore_disabled_status(tmp_path, monkeypatch):
