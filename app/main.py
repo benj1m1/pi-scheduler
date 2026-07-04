@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import secrets
 import math
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated
@@ -17,7 +18,20 @@ from fastapi.templating import Jinja2Templates
 from . import approved_skills, config, cron, cron_status, db, governance, pi_models, retention, runner, run_users, runtime_setup, work_window
 
 
-app = FastAPI(title="Pi Scheduler")
+def startup() -> None:
+    db.init_db()
+    retention.cleanup_old_logs()
+    runtime_setup.log_runtime_setup_warnings()
+    cron.write_cron_file()
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    startup()
+    yield
+
+
+app = FastAPI(title="Pi Scheduler", lifespan=lifespan)
 security = HTTPBasic()
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
@@ -228,14 +242,6 @@ def require_auth(credentials: Annotated[HTTPBasicCredentials, Depends(security)]
             headers={"WWW-Authenticate": "Basic"},
         )
     return credentials.username
-
-
-@app.on_event("startup")
-def startup() -> None:
-    db.init_db()
-    retention.cleanup_old_logs()
-    runtime_setup.log_runtime_setup_warnings()
-    cron.write_cron_file()
 
 
 def redirect_to(path: str) -> RedirectResponse:

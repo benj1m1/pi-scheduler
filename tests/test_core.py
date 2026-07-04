@@ -1,4 +1,6 @@
 import os
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -1495,6 +1497,18 @@ def test_runtime_setup_accepts_valid_mocked_setup(tmp_path, monkeypatch):
     monkeypatch.setattr(runtime_setup, "_can_write_as_runtime_user", lambda user_info, path: True)
 
     assert runtime_setup.check_runtime_setup() == []
+
+
+def test_main_import_has_no_fastapi_startup_deprecation_warning():
+    result = subprocess.run(
+        [sys.executable, "-W", "error::DeprecationWarning", "-c", "import app.main"],
+        cwd=Path(__file__).resolve().parents[1],
+        text=True,
+        capture_output=True,
+        timeout=20,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_startup_logs_runtime_setup_warnings(tmp_path, monkeypatch):
