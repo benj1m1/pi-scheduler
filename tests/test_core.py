@@ -388,6 +388,74 @@ def test_governance_validation_and_expiration_helpers():
     assert governance.is_expired(None, today=date(2026, 7, 4)) is False
 
 
+def test_pause_and_resume_routes_record_audit_events(tmp_path, monkeypatch):
+    from app import governance
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+    monkeypatch.setattr(web.cron, "write_cron_file", lambda: None)
+    db.init_db()
+    request = Request({"type": "http", "method": "POST", "path": "/governance/pause", "headers": [], "client": ("127.0.0.1", 12345)})
+
+    response = web.pause_scheduler(request, actor="admin", reason="maintenance")
+    assert response.status_code == 303
+    assert governance.is_paused() is True
+
+    response = web.resume_scheduler(request, actor="admin", reason="done")
+    assert response.status_code == 303
+    assert governance.is_paused() is False
+
+    events = governance.list_audit_events(limit=10)
+    assert [event["event_type"] for event in events[:2]] == ["system.resumed", "system.paused"]
+
+
+def test_job_create_records_audit_event(tmp_path, monkeypatch):
+    from app import governance
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+    monkeypatch.setattr(web.cron, "write_cron_file", lambda: None)
+    db.init_db()
+    request = Request({"type": "http", "method": "POST", "path": "/jobs", "headers": [], "client": ("127.0.0.1", 12345)})
+
+    response = web.create_job(
+        request,
+        actor="admin",
+        name="agent",
+        task_prompt="check",
+        schedule_every="5",
+        schedule_unit="minutes",
+        model_selection="",
+        output_mode="summary",
+        session_mode="no_session",
+        tool_mode="full",
+        work_start="",
+        work_end="",
+        timeout_seconds="240",
+        run_user="",
+        enabled="on",
+        prevent_overlap=None,
+        skills_mode="none",
+        skill_ids=[],
+        owner="Ben",
+        purpose="test",
+        scope="local",
+        environment="local",
+        risk_level="low",
+        expires_at="",
+    )
+
+    assert response.status_code == 303
+    events = governance.list_audit_events(limit=1)
+    assert events[0]["event_type"] == "job.created"
+    assert events[0]["actor"] == "admin"
+    assert events[0]["after"]["owner"] == "Ben"
+
+
 def test_audit_event_round_trip(tmp_path, monkeypatch):
     from app import governance
 
@@ -1489,7 +1557,7 @@ def test_manual_run_blocked_when_paused(tmp_path, monkeypatch):
     governance.pause("admin", "maintenance")
 
     try:
-        web.manual_run(job_id, web.BackgroundTasks())
+        web.manual_run(job_id, web.BackgroundTasks(), actor="admin")
     except web.HTTPException as exc:
         assert exc.status_code == 400
         assert "paused" in str(exc.detail).lower()
@@ -1890,7 +1958,7 @@ def test_toggle_job_redirects_back_to_detail_when_requested(tmp_path, monkeypatc
         }
     )
 
-    response = web.toggle_job(job_id, return_to="detail")
+    response = web.toggle_job(job_id, actor="admin", return_to="detail")
 
     assert response.status_code == 303
     assert response.headers["location"] == f"/jobs/{job_id}"
@@ -2990,7 +3058,7 @@ def test_manual_run_queues_background_task(tmp_path, monkeypatch):
             self.calls.append((func, args, kwargs))
 
     tasks = Tasks()
-    response = web.manual_run(job_id, tasks)
+    response = web.manual_run(job_id, tasks, actor="admin")
 
     assert response.status_code == 303
     assert response.headers["location"] == f"/jobs/{job_id}?queued=1"
@@ -3028,7 +3096,7 @@ def test_manual_run_from_index_returns_to_index(tmp_path, monkeypatch):
             self.calls.append((func, args, kwargs))
 
     tasks = Tasks()
-    response = web.manual_run(job_id, tasks, return_to="index")
+    response = web.manual_run(job_id, tasks, actor="admin", return_to="index")
 
     assert response.status_code == 303
     assert response.headers["location"] == f"/?queued={job_id}"
@@ -3069,7 +3137,7 @@ def test_manual_group_run_queues_background_task(tmp_path, monkeypatch):
             self.calls.append((func, args, kwargs))
 
     tasks = Tasks()
-    response = web.manual_group_run(group_id, tasks, return_to="index")
+    response = web.manual_group_run(group_id, tasks, actor="admin", return_to="index")
 
     assert response.status_code == 303
     assert response.headers["location"] == f"/?queued={group_id}"

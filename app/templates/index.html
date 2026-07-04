@@ -13,6 +13,29 @@
   </div>
 </section>
 
+<section class="panel governance-panel">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Governance</p>
+      <h2>Scheduler control</h2>
+      <p class="hint">Pause or resume all automatic and manual agent execution.</p>
+    </div>
+    <span class="badge {{ 'bad' if pause_status.paused else 'ok' }}">{{ 'paused' if pause_status.paused else 'active' }}</span>
+  </div>
+  {% if pause_status.paused %}
+  <p><strong>Reason:</strong> {{ pause_status.reason }}</p>
+  <form method="post" action="/governance/resume" class="inline-form">
+    <input name="reason" required placeholder="Resume reason">
+    <button type="submit">Resume</button>
+  </form>
+  {% else %}
+  <form method="post" action="/governance/pause" class="inline-form">
+    <input name="reason" required placeholder="Pause reason">
+    <button class="danger" type="submit">Pause all</button>
+  </form>
+  {% endif %}
+</section>
+
 {% if pause_status.paused %}
 <section class="banner warning-banner">
   <strong>Scheduler paused.</strong> {{ pause_status.reason }}

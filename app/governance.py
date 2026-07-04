@@ -177,7 +177,7 @@ def list_audit_events(
             f"""
             select * from audit_events
             {where}
-            order by created_at desc
+            order by created_at desc, rowid desc
             limit ? offset ?
             """,
             params,

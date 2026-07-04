@@ -583,6 +583,28 @@ def index(request: Request, queued: str = ""):
     )
 
 
+@app.post("/governance/pause", dependencies=[Depends(require_auth)])
+def pause_scheduler(
+    request: Request,
+    actor: Annotated[str, Depends(require_auth)],
+    reason: Annotated[str, Form()],
+):
+    governance.pause(actor, reason, source_ip(request))
+    cron.write_cron_file()
+    return redirect_to("/")
+
+
+@app.post("/governance/resume", dependencies=[Depends(require_auth)])
+def resume_scheduler(
+    request: Request,
+    actor: Annotated[str, Depends(require_auth)],
+    reason: Annotated[str, Form()],
+):
+    governance.resume(actor, reason, source_ip(request))
+    cron.write_cron_file()
+    return redirect_to("/")
+
+
 @app.get("/jobs/new", dependencies=[Depends(require_auth)])
 def new_job(request: Request):
     job = {
@@ -623,6 +645,7 @@ def new_job(request: Request):
 @app.post("/jobs", dependencies=[Depends(require_auth)])
 def create_job(
     request: Request,
+    actor: Annotated[str, Depends(require_auth)],
     name: Annotated[str, Form()],
     task_prompt: Annotated[str, Form()],
     schedule_every: Annotated[str, Form()],
@@ -680,6 +703,16 @@ def create_job(
         )
     data["timeout_seconds"] = int(data["timeout_seconds"])
     job_id = db.create_job(data)
+    after = db.get_job(job_id)
+    governance.record_audit_event(
+        actor,
+        "job.created",
+        "job",
+        job_id,
+        f"Created job {after['name']}",
+        after=after,
+        source_ip=source_ip(request),
+    )
     cron.write_cron_file()
     return redirect_to(f"/jobs/{job_id}")
 
@@ -715,6 +748,7 @@ def new_group(request: Request):
 @app.post("/groups", dependencies=[Depends(require_auth)])
 def create_group(
     request: Request,
+    actor: Annotated[str, Depends(require_auth)],
     name: Annotated[str, Form()],
     schedule_every: Annotated[str, Form()],
     schedule_unit: Annotated[str, Form()],
@@ -757,6 +791,16 @@ def create_group(
             status_code=400,
         )
     group_id = db.create_group(data, data["member_job_ids"])
+    after = db.get_group_with_members(group_id)
+    governance.record_audit_event(
+        actor,
+        "group.created",
+        "group",
+        group_id,
+        f"Created group {after['name']}",
+        after=after,
+        source_ip=source_ip(request),
+    )
     cron.write_cron_file()
     return redirect_to(f"/groups/{group_id}")
 
@@ -800,6 +844,7 @@ def edit_group(request: Request, group_id: str):
 def update_group(
     request: Request,
     group_id: str,
+    actor: Annotated[str, Depends(require_auth)],
     name: Annotated[str, Form()],
     schedule_every: Annotated[str, Form()],
     schedule_unit: Annotated[str, Form()],
@@ -816,7 +861,8 @@ def update_group(
     risk_level: Annotated[str, Form()] = "low",
     expires_at: Annotated[str, Form()] = "",
 ):
-    if db.get_group(group_id) is None:
+    before = db.get_group_with_members(group_id)
+    if before is None:
         raise HTTPException(status_code=404, detail="Group not found")
     data = group_form_data(
         name,
@@ -845,16 +891,42 @@ def update_group(
             status_code=400,
         )
     db.update_group(group_id, data, data["member_job_ids"])
+    after = db.get_group_with_members(group_id)
+    governance.record_audit_event(
+        actor,
+        "group.updated",
+        "group",
+        group_id,
+        f"Updated group {after['name']}",
+        before=before,
+        after=after,
+        source_ip=source_ip(request),
+    )
     cron.write_cron_file()
     return redirect_to(f"/groups/{group_id}")
 
 
 @app.post("/groups/{group_id}/toggle", dependencies=[Depends(require_auth)])
-def toggle_group(group_id: str, return_to: Annotated[str, Form()] = ""):
+def toggle_group(
+    group_id: str,
+    actor: Annotated[str, Depends(require_auth)],
+    return_to: Annotated[str, Form()] = "",
+):
     group = db.get_group(group_id)
     if group is None:
         raise HTTPException(status_code=404, detail="Group not found")
-    db.set_group_enabled(group_id, not bool(group["enabled"]))
+    enabled = not bool(group["enabled"])
+    db.set_group_enabled(group_id, enabled)
+    after = db.get_group(group_id)
+    governance.record_audit_event(
+        actor,
+        "group.enabled" if enabled else "group.disabled",
+        "group",
+        group_id,
+        f"{'Enabled' if enabled else 'Disabled'} group {group['name']}",
+        before=group,
+        after=after,
+    )
     cron.write_cron_file()
     if return_to == "detail":
         return redirect_to(f"/groups/{group_id}")
@@ -862,10 +934,20 @@ def toggle_group(group_id: str, return_to: Annotated[str, Form()] = ""):
 
 
 @app.post("/groups/{group_id}/delete", dependencies=[Depends(require_auth)])
-def delete_group(group_id: str):
-    if db.get_group(group_id) is None:
+def delete_group(group_id: str, actor: Annotated[str, Depends(require_auth)]):
+    before = db.get_group(group_id)
+    if before is None:
         raise HTTPException(status_code=404, detail="Group not found")
     db.soft_delete_group(group_id)
+    governance.record_audit_event(
+        actor,
+        "group.deleted",
+        "group",
+        group_id,
+        f"Deleted group {before['name']}",
+        before=before,
+        after={"deleted": True},
+    )
     cron.write_cron_file()
     return redirect_to("/")
 
@@ -874,6 +956,7 @@ def delete_group(group_id: str):
 def manual_group_run(
     group_id: str,
     background_tasks: BackgroundTasks,
+    actor: Annotated[str, Depends(require_auth)],
     return_to: Annotated[str, Form()] = "",
 ):
     group = db.get_group(group_id)
@@ -884,6 +967,14 @@ def manual_group_run(
         command = run_users.manual_runner_command("--group-id", group_id, group.get("run_user"))
     except run_users.RunUserError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    governance.record_audit_event(
+        actor,
+        "group.manual_run_requested",
+        "group",
+        group_id,
+        f"Manual run requested for group {group['name']}",
+        after={"run_user": run_users.effective_run_user(group.get("run_user")), "source": "manual"},
+    )
     background_tasks.add_task(run_users.launch_command, command)
     if return_to == "index":
         return redirect_to(f"/?queued={group_id}")
@@ -1031,6 +1122,7 @@ def edit_job(request: Request, job_id: str):
 def update_job(
     request: Request,
     job_id: str,
+    actor: Annotated[str, Depends(require_auth)],
     name: Annotated[str, Form()],
     task_prompt: Annotated[str, Form()],
     schedule_every: Annotated[str, Form()],
@@ -1054,7 +1146,8 @@ def update_job(
     risk_level: Annotated[str, Form()] = "low",
     expires_at: Annotated[str, Form()] = "",
 ):
-    if db.get_job(job_id) is None:
+    before = db.get_job(job_id)
+    if before is None:
         raise HTTPException(status_code=404, detail="Job not found")
     data = form_data(
         name,
@@ -1091,16 +1184,42 @@ def update_job(
         )
     data["timeout_seconds"] = int(data["timeout_seconds"])
     db.update_job(job_id, data)
+    after = db.get_job(job_id)
+    governance.record_audit_event(
+        actor,
+        "job.updated",
+        "job",
+        job_id,
+        f"Updated job {after['name']}",
+        before=before,
+        after=after,
+        source_ip=source_ip(request),
+    )
     cron.write_cron_file()
     return redirect_to(f"/jobs/{job_id}")
 
 
 @app.post("/jobs/{job_id}/toggle", dependencies=[Depends(require_auth)])
-def toggle_job(job_id: str, return_to: Annotated[str, Form()] = ""):
+def toggle_job(
+    job_id: str,
+    actor: Annotated[str, Depends(require_auth)],
+    return_to: Annotated[str, Form()] = "",
+):
     job = db.get_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
-    db.set_job_enabled(job_id, not bool(job["enabled"]))
+    enabled = not bool(job["enabled"])
+    db.set_job_enabled(job_id, enabled)
+    after = db.get_job(job_id)
+    governance.record_audit_event(
+        actor,
+        "job.enabled" if enabled else "job.disabled",
+        "job",
+        job_id,
+        f"{'Enabled' if enabled else 'Disabled'} job {job['name']}",
+        before=job,
+        after=after,
+    )
     cron.write_cron_file()
     if return_to == "detail":
         return redirect_to(f"/jobs/{job_id}")
@@ -1108,13 +1227,23 @@ def toggle_job(job_id: str, return_to: Annotated[str, Form()] = ""):
 
 
 @app.post("/jobs/{job_id}/delete", dependencies=[Depends(require_auth)])
-def delete_job(job_id: str):
-    if db.get_job(job_id) is None:
+def delete_job(job_id: str, actor: Annotated[str, Depends(require_auth)]):
+    before = db.get_job(job_id)
+    if before is None:
         raise HTTPException(status_code=404, detail="Job not found")
     try:
         db.soft_delete_job(job_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    governance.record_audit_event(
+        actor,
+        "job.deleted",
+        "job",
+        job_id,
+        f"Deleted job {before['name']}",
+        before=before,
+        after={"deleted": True},
+    )
     cron.write_cron_file()
     return redirect_to("/")
 
@@ -1123,6 +1252,7 @@ def delete_job(job_id: str):
 def manual_run(
     job_id: str,
     background_tasks: BackgroundTasks,
+    actor: Annotated[str, Depends(require_auth)],
     return_to: Annotated[str, Form()] = "",
 ):
     job = db.get_job(job_id)
@@ -1133,6 +1263,14 @@ def manual_run(
         command = run_users.manual_runner_command("--job-id", job_id, job.get("run_user"))
     except run_users.RunUserError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    governance.record_audit_event(
+        actor,
+        "job.manual_run_requested",
+        "job",
+        job_id,
+        f"Manual run requested for job {job['name']}",
+        after={"run_user": run_users.effective_run_user(job.get("run_user")), "source": "manual"},
+    )
     background_tasks.add_task(run_users.launch_command, command)
     if return_to == "index":
         return redirect_to(f"/?queued={job_id}")
