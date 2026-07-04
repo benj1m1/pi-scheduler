@@ -58,6 +58,18 @@
       <p class="hint">Read-only tools allow <code>read</code>, <code>grep</code>, <code>find</code>, and <code>ls</code>. No tools disables all Pi tools.</p>
     </fieldset>
     <fieldset>
+      <legend>Run user</legend>
+      <label>Run as user
+        <select name="run_user">
+          <option value="" {% if not job.run_user %}selected{% endif %}>Default ({{ default_run_user }})</option>
+          {% for user in allowed_run_users %}
+          <option value="{{ user }}" {% if job.run_user == user %}selected{% endif %}>{{ user }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <p class="hint">Scheduled and manual runs use this Linux user. Leave as default to use <code>{{ default_run_user }}</code>.</p>
+    </fieldset>
+    <fieldset>
       <legend>Schedule</legend>
       <div class="inline-fields">
         <label>Every <input name="schedule_every" type="number" min="1" max="59" value="{{ job.schedule_every }}" required></label>

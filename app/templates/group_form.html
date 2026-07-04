@@ -60,6 +60,18 @@
       </template>
     </fieldset>
     <fieldset>
+      <legend>Run user</legend>
+      <label>Run as user
+        <select name="run_user">
+          <option value="" {% if not group.run_user %}selected{% endif %}>Default ({{ default_run_user }})</option>
+          {% for user in allowed_run_users %}
+          <option value="{{ user }}" {% if group.run_user == user %}selected{% endif %}>{{ user }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <p class="hint">The whole group runs as this Linux user. Member job run users are ignored during group execution.</p>
+    </fieldset>
+    <fieldset>
       <legend>Schedule</legend>
       <div class="inline-fields">
         <label>Every <input name="schedule_every" type="number" min="1" max="59" value="{{ group.schedule_every }}" required></label>

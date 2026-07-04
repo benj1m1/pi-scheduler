@@ -20,10 +20,11 @@
     </dd>
     <dt>Schedule</dt><dd>{{ group.cron_expr|describe_cron }}</dd>
     <dt>Work window</dt><dd>{{ group.work_start|describe_work_window(group.work_end) }}</dd>
+    <dt>Run as</dt><dd>{{ group.run_user|describe_run_user }}</dd>
     <dt>Cron</dt><dd><code>{{ group.cron_expr }}</code></dd>
     <dt>Overlap</dt><dd>{{ 'prevented' if group.prevent_overlap else 'allowed' }}</dd>
     <dt>Failure policy</dt><dd>{{ 'continue after failed steps' if group.continue_on_failure else 'stop on first failed step' }}</dd>
-    <dt>Member guards</dt><dd>Member enabled states and work windows do not gate group execution. Member overlap still applies.</dd>
+    <dt>Member guards</dt><dd>Member enabled states, work windows, and standalone run users do not gate group execution. Member overlap still applies.</dd>
   </dl>
   <div class="actions">
     <a class="button" href="/groups/{{ group.id }}/edit">Edit</a>

@@ -14,7 +14,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import config, cron, db, pi_models, retention, runner, work_window
+from . import config, cron, db, pi_models, retention, runner, run_users, work_window
 
 
 app = FastAPI(title="Pi Scheduler")
@@ -180,6 +180,7 @@ templates.env.filters["beijing_time"] = beijing_time
 templates.env.filters["seconds_duration"] = seconds_duration
 templates.env.filters["describe_cron"] = cron.describe_cron
 templates.env.filters["describe_work_window"] = work_window.describe
+templates.env.filters["describe_run_user"] = run_users.describe_run_user
 templates.env.filters["group_run_path"] = group_run_path
 
 
@@ -236,6 +237,10 @@ def validate_job_form(data: dict) -> list[str]:
         work_window.validate(data.get("work_start"), data.get("work_end"))
     except ValueError as exc:
         errors.append(str(exc))
+    try:
+        run_users.validate_run_user(data.get("run_user"))
+    except run_users.RunUserError as exc:
+        errors.append(str(exc))
     if data.get("output_mode") not in OUTPUT_MODES:
         errors.append("Output mode is invalid")
     if data.get("session_mode") not in SESSION_MODES:
@@ -263,6 +268,7 @@ def form_data(
     work_start: str,
     work_end: str,
     timeout_seconds: str,
+    run_user: str,
     enabled: str | None,
     prevent_overlap: str | None,
 ) -> dict:
@@ -297,6 +303,7 @@ def form_data(
         "work_start": work_start.strip() or None,
         "work_end": work_end.strip() or None,
         "timeout_seconds": timeout_seconds.strip(),
+        "run_user": run_user.strip() or None,
         "enabled": parse_bool(enabled),
         "prevent_overlap": 1,
     }
@@ -316,6 +323,7 @@ def with_schedule(job: dict) -> dict:
     job["output_mode"] = job.get("output_mode") or "summary"
     job["session_mode"] = job.get("session_mode") or "no_session"
     job["tool_mode"] = job.get("tool_mode") or "full"
+    job["run_user"] = job.get("run_user") or ""
     return job
 
 
@@ -336,6 +344,8 @@ def job_form_context(request: Request, job: dict, errors: list[str], action: str
         "model_config_error": model_config_error,
         "models_file": str(config.PI_MODELS_FILE),
         "hour_options": hour_options(),
+        "allowed_run_users": run_users.allowed_run_users(),
+        "default_run_user": config.CRON_USER,
     }
 
 
@@ -345,6 +355,7 @@ def group_form_data(
     schedule_unit: str,
     work_start: str,
     work_end: str,
+    run_user: str,
     enabled: str | None,
     continue_on_failure: str | None,
     member_job_ids: list[str] | None,
@@ -364,6 +375,7 @@ def group_form_data(
         "schedule_error": schedule_error,
         "work_start": work_start.strip() or None,
         "work_end": work_end.strip() or None,
+        "run_user": run_user.strip() or None,
         "enabled": parse_bool(enabled),
         "prevent_overlap": 1,
         "continue_on_failure": parse_bool(continue_on_failure),
@@ -386,6 +398,10 @@ def validate_group_form(data: dict) -> list[str]:
         work_window.validate(data.get("work_start"), data.get("work_end"))
     except ValueError as exc:
         errors.append(str(exc))
+    try:
+        run_users.validate_run_user(data.get("run_user"))
+    except run_users.RunUserError as exc:
+        errors.append(str(exc))
     members = data.get("member_job_ids", [])
     if not members:
         errors.append("Choose at least one job")
@@ -404,6 +420,7 @@ def with_group_schedule(group: dict) -> dict:
     group["schedule_unit"] = schedule["unit"]
     group["work_start"] = group.get("work_start") or ""
     group["work_end"] = group.get("work_end") or ""
+    group["run_user"] = group.get("run_user") or ""
     group["continue_on_failure"] = int(group.get("continue_on_failure", 0))
     group["member_job_ids"] = [member["job_id"] for member in group.get("members", [])]
     return group
@@ -420,6 +437,8 @@ def group_form_context(request: Request, group: dict, errors: list[str], action:
         "jobs": db.list_jobs(),
         "member_job_ids": member_job_ids,
         "hour_options": hour_options(),
+        "allowed_run_users": run_users.allowed_run_users(),
+        "default_run_user": config.CRON_USER,
     }
 
 
@@ -457,6 +476,7 @@ def new_job(request: Request):
         "output_mode": "summary",
         "session_mode": "no_session",
         "tool_mode": "full",
+        "run_user": "",
     }
     return templates.TemplateResponse(
         request,
@@ -479,6 +499,7 @@ def create_job(
     output_mode: Annotated[str, Form()] = "summary",
     session_mode: Annotated[str, Form()] = "no_session",
     tool_mode: Annotated[str, Form()] = "full",
+    run_user: Annotated[str, Form()] = "",
     enabled: Annotated[str | None, Form()] = None,
     prevent_overlap: Annotated[str | None, Form()] = None,
 ):
@@ -494,6 +515,7 @@ def create_job(
         work_start,
         work_end,
         timeout_seconds,
+        run_user,
         enabled,
         prevent_overlap,
     )
@@ -523,6 +545,7 @@ def new_group(request: Request):
         "enabled": 1,
         "prevent_overlap": 1,
         "continue_on_failure": 0,
+        "run_user": "",
         "member_job_ids": [],
     }
     return templates.TemplateResponse(
@@ -540,6 +563,7 @@ def create_group(
     schedule_unit: Annotated[str, Form()],
     work_start: Annotated[str, Form()] = "",
     work_end: Annotated[str, Form()] = "",
+    run_user: Annotated[str, Form()] = "",
     enabled: Annotated[str | None, Form()] = None,
     continue_on_failure: Annotated[str | None, Form()] = None,
     member_job_ids: Annotated[list[str] | None, Form()] = None,
@@ -550,6 +574,7 @@ def create_group(
         schedule_unit,
         work_start,
         work_end,
+        run_user,
         enabled,
         continue_on_failure,
         member_job_ids,
@@ -610,6 +635,7 @@ def update_group(
     schedule_unit: Annotated[str, Form()],
     work_start: Annotated[str, Form()] = "",
     work_end: Annotated[str, Form()] = "",
+    run_user: Annotated[str, Form()] = "",
     enabled: Annotated[str | None, Form()] = None,
     continue_on_failure: Annotated[str | None, Form()] = None,
     member_job_ids: Annotated[list[str] | None, Form()] = None,
@@ -622,6 +648,7 @@ def update_group(
         schedule_unit,
         work_start,
         work_end,
+        run_user,
         enabled,
         continue_on_failure,
         member_job_ids,
@@ -826,6 +853,7 @@ def update_job(
     output_mode: Annotated[str, Form()] = "summary",
     session_mode: Annotated[str, Form()] = "no_session",
     tool_mode: Annotated[str, Form()] = "full",
+    run_user: Annotated[str, Form()] = "",
     enabled: Annotated[str | None, Form()] = None,
     prevent_overlap: Annotated[str | None, Form()] = None,
 ):
@@ -843,6 +871,7 @@ def update_job(
         work_start,
         work_end,
         timeout_seconds,
+        run_user,
         enabled,
         prevent_overlap,
     )

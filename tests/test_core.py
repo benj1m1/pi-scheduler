@@ -29,11 +29,90 @@ def test_form_data_forces_overlap_prevention():
         "",
         "",
         "240",
+        "",
         "on",
         None,
     )
 
     assert data["prevent_overlap"] == 1
+
+
+def test_job_form_data_includes_run_user(monkeypatch):
+    from app import run_users
+
+    monkeypatch.setattr(config, "CRON_USER", "root")
+    monkeypatch.setattr(config, "ALLOWED_RUN_USERS", "root,piagent", raising=False)
+    monkeypatch.setattr(run_users.pwd, "getpwnam", lambda name: object())
+
+    data = web.form_data(
+        "agent",
+        "check logs",
+        "5",
+        "minutes",
+        "",
+        "summary",
+        "no_session",
+        "full",
+        "",
+        "",
+        "240",
+        "piagent",
+        "on",
+        None,
+    )
+
+    assert data["run_user"] == "piagent"
+    assert web.validate_job_form(data) == []
+
+
+def test_group_form_data_includes_run_user(monkeypatch):
+    from app import run_users
+
+    monkeypatch.setattr(config, "CRON_USER", "root")
+    monkeypatch.setattr(config, "ALLOWED_RUN_USERS", "root,piagent", raising=False)
+    monkeypatch.setattr(run_users.pwd, "getpwnam", lambda name: object())
+
+    data = web.group_form_data(
+        "flow",
+        "5",
+        "minutes",
+        "",
+        "",
+        "piagent",
+        "on",
+        None,
+        ["job-a"],
+    )
+
+    assert data["run_user"] == "piagent"
+    assert "Run user" not in "\n".join(web.validate_group_form(data))
+
+
+def test_validate_job_form_rejects_invalid_run_user(monkeypatch):
+    from app import run_users
+
+    monkeypatch.setattr(config, "CRON_USER", "root")
+    monkeypatch.setattr(config, "ALLOWED_RUN_USERS", "root,piagent", raising=False)
+    monkeypatch.setattr(run_users.pwd, "getpwnam", lambda name: object())
+
+    data = web.form_data(
+        "agent",
+        "check logs",
+        "5",
+        "minutes",
+        "",
+        "summary",
+        "no_session",
+        "full",
+        "",
+        "",
+        "240",
+        "bad user",
+        "on",
+        None,
+    )
+
+    assert "Run user is invalid" in web.validate_job_form(data)
 
 
 def test_db_forces_overlap_prevention(tmp_path, monkeypatch):
