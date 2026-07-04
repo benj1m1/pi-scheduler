@@ -474,6 +474,10 @@ def test_audit_page_renders_events(tmp_path, monkeypatch):
     assert "job.created" in html
     assert "Created job agent" in html
     assert "admin" in html
+    assert "audit-feed" in html
+    assert "audit-event-card" in html
+    assert "View details" in html
+    assert "<table" not in html
 
 
 def test_audit_event_round_trip(tmp_path, monkeypatch):

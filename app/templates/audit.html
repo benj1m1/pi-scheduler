@@ -1,47 +1,97 @@
 {% extends "base.html" %}
 {% block title %}Audit Log - Pi Scheduler{% endblock %}
 {% block content %}
-<section class="panel page-panel">
-  <div class="card-head">
+<section class="panel page-panel audit-page">
+  <div class="page-hero audit-hero">
     <div>
       <p class="eyebrow">Governance</p>
       <h1>Audit Log</h1>
-      <p class="hint">Trace administrative changes, manual run requests, and scheduler pause/resume events.</p>
+      <p>Trace administrative changes, manual run requests, and scheduler pause/resume events.</p>
     </div>
+    <span class="hero-stat"><strong>{{ events|length }}</strong><span>shown</span></span>
   </div>
-  <form class="filters" method="get" action="/audit">
-    <label>Target type <input name="target_type" value="{{ filters.target_type }}" placeholder="job, group, system"></label>
-    <label>Event type <input name="event_type" value="{{ filters.event_type }}" placeholder="job.updated"></label>
-    <label>Target id <input name="target_id" value="{{ filters.target_id }}"></label>
-    <button type="submit">Filter</button>
-    <a class="button-secondary" href="/audit">Clear</a>
+
+  <form class="filters audit-filters" method="get" action="/audit">
+    <label>Target type
+      <select name="target_type">
+        <option value="" {% if not filters.target_type %}selected{% endif %}>All targets</option>
+        <option value="system" {% if filters.target_type == 'system' %}selected{% endif %}>System</option>
+        <option value="job" {% if filters.target_type == 'job' %}selected{% endif %}>Job</option>
+        <option value="group" {% if filters.target_type == 'group' %}selected{% endif %}>Group</option>
+      </select>
+    </label>
+    <label>Event type
+      <input name="event_type" value="{{ filters.event_type }}" placeholder="job.updated">
+    </label>
+    <label>Target id
+      <input name="target_id" value="{{ filters.target_id }}" placeholder="optional id">
+    </label>
+    <div class="filter-actions audit-filter-actions">
+      <button type="submit">Filter</button>
+      <a class="button-secondary" href="/audit">Clear</a>
+    </div>
   </form>
-  <div class="table-wrap">
-    <table class="data-table">
-      <thead><tr><th>Time</th><th>Actor</th><th>Event</th><th>Target</th><th>Summary</th><th>Details</th></tr></thead>
-      <tbody>
-      {% for event in events %}
-      <tr>
-        <td>{{ event.created_at|beijing_time }}</td>
-        <td>{{ event.actor }}</td>
-        <td><code>{{ event.event_type }}</code></td>
-        <td>{{ event.target_type }}{% if event.target_id %}: {{ event.target_id }}{% endif %}</td>
-        <td>{{ event.summary }}</td>
-        <td>
-          <details>
-            <summary>JSON</summary>
-            <pre>{{ {'before': event.before, 'after': event.after}|tojson(indent=2) }}</pre>
-          </details>
-        </td>
-      </tr>
+
+  <div class="audit-feed" aria-label="Audit events">
+    {% for event in events %}
+      {% set event_type = event.event_type %}
+      {% if 'deleted' in event_type or event_type == 'system.paused' %}
+        {% set tone = 'danger' %}
+      {% elif 'disabled' in event_type %}
+        {% set tone = 'warning' %}
+      {% elif 'created' in event_type or 'enabled' in event_type or event_type == 'system.resumed' %}
+        {% set tone = 'success' %}
       {% else %}
-      <tr><td colspan="6">No audit events found.</td></tr>
-      {% endfor %}
-      </tbody>
-    </table>
+        {% set tone = 'primary' %}
+      {% endif %}
+      <article class="audit-event-card audit-event-{{ tone }}">
+        <div class="audit-event-marker" aria-hidden="true"></div>
+        <div class="audit-event-body">
+          <div class="audit-event-head">
+            <div>
+              <h2>{{ event.summary }}</h2>
+              <p class="audit-event-meta">
+                <strong>{{ event.actor }}</strong>
+                <span aria-hidden="true">·</span>
+                <time datetime="{{ event.created_at }}">{{ event.created_at|beijing_time }}</time>
+                <span aria-hidden="true">·</span>
+                <span>{{ event.target_type }}{% if event.target_id %}: {{ event.target_id }}{% endif %}</span>
+                {% if event.source_ip %}
+                  <span aria-hidden="true">·</span>
+                  <span>{{ event.source_ip }}</span>
+                {% endif %}
+              </p>
+            </div>
+            <span class="audit-chip audit-chip-{{ tone }}">{{ event.event_type }}</span>
+          </div>
+
+          <details class="audit-details">
+            <summary>View details</summary>
+            <div class="audit-detail-grid">
+              <section>
+                <h3>Before</h3>
+                <pre>{{ event.before|tojson(indent=2) }}</pre>
+              </section>
+              <section>
+                <h3>After</h3>
+                <pre>{{ event.after|tojson(indent=2) }}</pre>
+              </section>
+            </div>
+          </details>
+        </div>
+      </article>
+    {% else %}
+      <section class="empty soft-empty audit-empty">
+        <p class="eyebrow">No events</p>
+        <h2>No audit events found</h2>
+        <p class="hint">Try clearing filters or changing the target/event criteria.</p>
+      </section>
+    {% endfor %}
   </div>
-  <div class="actions">
+
+  <div class="pagination">
     {% if page > 1 %}<a class="button" href="/audit?page={{ page - 1 }}">Previous</a>{% endif %}
+    <span class="page-pill">Page {{ page }}</span>
     {% if has_next_page %}<a class="button" href="/audit?page={{ page + 1 }}">Next</a>{% endif %}
   </div>
 </section>
