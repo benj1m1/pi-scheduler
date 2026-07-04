@@ -195,6 +195,17 @@ The run user needs Pi CLI credentials and model configuration under its own home
 
 Manual Run Now uses the configured run user by launching `bin/pi-job-runner --source manual`. If the web service runs as root, it switches users with `sudo -u` or `runuser`. If it cannot switch users, the manual run is rejected instead of running as the wrong user.
 
+### Agent Governance
+
+Pi Scheduler includes governance controls for scheduled Pi agents:
+
+- **Global pause** stops automatic cron execution and manual Run Now requests. The runner also checks pause state before invoking Pi, so stale cron entries and direct runner calls are blocked.
+- **Governance metadata** lets jobs and groups document owner, purpose, scope, environment, risk level, and expiration date.
+- **Expiration** uses `YYYY-MM-DD` Beijing-date semantics. Expired jobs and groups are not executed by cron, manual runs, or direct runner invocation.
+- **Audit logs** record administrative changes, manual run requests, and pause/resume events.
+
+These controls support accountability, scoped execution, traceability, and emergency disablement.
+
 ### Time Display
 
 Timestamps are stored in UTC (`2026-06-27T14:00:13Z`) and displayed as Beijing time (`2026-06-27 22:00:13 Beijing`).
@@ -292,6 +303,8 @@ Six SQLite tables with inline, idempotent migrations in `init_db()`:
 | `job_group_members` | Ordered member jobs per group |
 | `group_runs` | Group execution records |
 | `group_run_steps` | Per-step status within a group run |
+| `app_settings` | Scheduler-wide settings such as global pause state |
+| `audit_events` | Administrative audit log entries |
 
 All jobs and groups support soft delete. Schema changes are backward-compatible ALTER TABLE additions in `db.init_db()` — no standalone migration files.
 
@@ -331,6 +344,9 @@ All routes require Basic Auth.
 | GET | `/runs/{rid}` | Single run detail (stdout, stderr, JSONL) |
 | GET | `/logs` | Filterable/paginated log viewer |
 | POST | `/logs/cleanup` | Manual log cleanup |
+| GET | `/audit` | Filterable audit log |
+| POST | `/governance/pause` | Pause all scheduled and manual execution |
+| POST | `/governance/resume` | Resume scheduled and manual execution |
 | GET | `/cron` | Read-only cron file preview |
 | GET | `/maintenance/logs` | Legacy redirect → `/logs` |
 
