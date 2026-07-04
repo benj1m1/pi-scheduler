@@ -40,6 +40,12 @@ def init_db() -> None:
               skills_mode text not null default 'none',
               skill_paths text not null default '',
               skill_ids text not null default '',
+              owner text not null default '',
+              purpose text not null default '',
+              scope text not null default '',
+              environment text not null default 'local',
+              risk_level text not null default 'low',
+              expires_at text,
               run_user text,
               created_at text not null,
               updated_at text not null,
@@ -71,6 +77,12 @@ def init_db() -> None:
               enabled integer not null default 1,
               prevent_overlap integer not null default 1,
               continue_on_failure integer not null default 0,
+              owner text not null default '',
+              purpose text not null default '',
+              scope text not null default '',
+              environment text not null default 'local',
+              risk_level text not null default 'low',
+              expires_at text,
               run_user text,
               work_start text,
               work_end text,
@@ -119,6 +131,25 @@ def init_db() -> None:
               foreign key (run_id) references runs(id) on delete set null
             );
 
+            create table if not exists app_settings (
+              key text primary key,
+              value text not null,
+              updated_at text not null
+            );
+
+            create table if not exists audit_events (
+              id text primary key,
+              created_at text not null,
+              actor text not null,
+              event_type text not null,
+              target_type text not null,
+              target_id text,
+              summary text not null,
+              before_json text,
+              after_json text,
+              source_ip text
+            );
+
             create index if not exists idx_runs_job_started_at on runs(job_id, started_at desc);
             create index if not exists idx_runs_started_at on runs(started_at desc);
             create index if not exists idx_jobs_deleted_created_at on jobs(deleted_at, created_at desc);
@@ -129,6 +160,8 @@ def init_db() -> None:
             create index if not exists idx_group_runs_group_started_at on group_runs(group_id, started_at desc);
             create index if not exists idx_group_runs_running_group on group_runs(group_id) where status = 'running';
             create index if not exists idx_group_run_steps_run on group_run_steps(run_id);
+            create index if not exists idx_audit_events_created_at on audit_events(created_at desc);
+            create index if not exists idx_audit_events_target on audit_events(target_type, target_id, created_at desc);
             """
         )
         columns = {row[1] for row in conn.execute("pragma table_info(jobs)").fetchall()}
@@ -152,6 +185,16 @@ def init_db() -> None:
             conn.execute("alter table jobs add column skill_paths text not null default ''")
         if "skill_ids" not in columns:
             conn.execute("alter table jobs add column skill_ids text not null default ''")
+        for column, ddl in {
+            "owner": "text not null default ''",
+            "purpose": "text not null default ''",
+            "scope": "text not null default ''",
+            "environment": "text not null default 'local'",
+            "risk_level": "text not null default 'low'",
+            "expires_at": "text",
+        }.items():
+            if column not in columns:
+                conn.execute(f"alter table jobs add column {column} {ddl}")
         if "run_user" not in columns:
             conn.execute("alter table jobs add column run_user text")
         run_columns = {row[1] for row in conn.execute("pragma table_info(runs)").fetchall()}
@@ -165,6 +208,16 @@ def init_db() -> None:
         group_columns = {row[1] for row in conn.execute("pragma table_info(job_groups)").fetchall()}
         if "continue_on_failure" not in group_columns:
             conn.execute("alter table job_groups add column continue_on_failure integer not null default 0")
+        for column, ddl in {
+            "owner": "text not null default ''",
+            "purpose": "text not null default ''",
+            "scope": "text not null default ''",
+            "environment": "text not null default 'local'",
+            "risk_level": "text not null default 'low'",
+            "expires_at": "text",
+        }.items():
+            if column not in group_columns:
+                conn.execute(f"alter table job_groups add column {column} {ddl}")
         if "run_user" not in group_columns:
             conn.execute("alter table job_groups add column run_user text")
         conn.execute("update jobs set prevent_overlap = 1 where prevent_overlap != 1")
@@ -295,8 +348,9 @@ def create_job(data: dict[str, Any]) -> str:
             insert into jobs (
               id, name, skill_name, task_prompt, cron_expr, provider_name, model_id, enabled,
               work_start, work_end, timeout_seconds, prevent_overlap, output_mode, session_mode,
-              tool_mode, skills_mode, skill_paths, skill_ids, run_user, created_at, updated_at
-            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              tool_mode, skills_mode, skill_paths, skill_ids, owner, purpose, scope,
+              environment, risk_level, expires_at, run_user, created_at, updated_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 job_id,
@@ -317,6 +371,12 @@ def create_job(data: dict[str, Any]) -> str:
                 data.get("skills_mode", "none"),
                 data.get("skill_paths", ""),
                 data.get("skill_ids", ""),
+                data.get("owner", ""),
+                data.get("purpose", ""),
+                data.get("scope", ""),
+                data.get("environment", "local"),
+                data.get("risk_level", "low"),
+                data.get("expires_at"),
                 data.get("run_user"),
                 now,
                 now,
@@ -333,7 +393,9 @@ def update_job(job_id: str, data: dict[str, Any]) -> None:
             set name = ?, skill_name = ?, task_prompt = ?, cron_expr = ?, enabled = ?,
                 provider_name = ?, model_id = ?, work_start = ?, work_end = ?,
                 timeout_seconds = ?, prevent_overlap = ?, output_mode = ?, session_mode = ?,
-                tool_mode = ?, skills_mode = ?, skill_paths = ?, skill_ids = ?, run_user = ?, updated_at = ?
+                tool_mode = ?, skills_mode = ?, skill_paths = ?, skill_ids = ?, owner = ?,
+                purpose = ?, scope = ?, environment = ?, risk_level = ?, expires_at = ?,
+                run_user = ?, updated_at = ?
             where id = ? and deleted_at is null
             """,
             (
@@ -354,6 +416,12 @@ def update_job(job_id: str, data: dict[str, Any]) -> None:
                 data.get("skills_mode", "none"),
                 data.get("skill_paths", ""),
                 data.get("skill_ids", ""),
+                data.get("owner", ""),
+                data.get("purpose", ""),
+                data.get("scope", ""),
+                data.get("environment", "local"),
+                data.get("risk_level", "low"),
+                data.get("expires_at"),
                 data.get("run_user"),
                 utc_now(),
                 job_id,
@@ -478,8 +546,9 @@ def create_group(data: dict[str, Any], member_job_ids: list[str]) -> str:
             """
             insert into job_groups (
               id, name, cron_expr, enabled, prevent_overlap, continue_on_failure,
+              owner, purpose, scope, environment, risk_level, expires_at,
               run_user, work_start, work_end, created_at, updated_at
-            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 group_id,
@@ -488,6 +557,12 @@ def create_group(data: dict[str, Any], member_job_ids: list[str]) -> str:
                 int(data.get("enabled", 1)),
                 1,
                 int(data.get("continue_on_failure", 0)),
+                data.get("owner", ""),
+                data.get("purpose", ""),
+                data.get("scope", ""),
+                data.get("environment", "local"),
+                data.get("risk_level", "low"),
+                data.get("expires_at"),
                 data.get("run_user"),
                 data.get("work_start"),
                 data.get("work_end"),
@@ -514,6 +589,7 @@ def update_group(group_id: str, data: dict[str, Any], member_job_ids: list[str])
             """
             update job_groups
             set name = ?, cron_expr = ?, enabled = ?, prevent_overlap = ?, continue_on_failure = ?,
+                owner = ?, purpose = ?, scope = ?, environment = ?, risk_level = ?, expires_at = ?,
                 run_user = ?, work_start = ?, work_end = ?, updated_at = ?
             where id = ? and deleted_at is null
             """,
@@ -523,6 +599,12 @@ def update_group(group_id: str, data: dict[str, Any], member_job_ids: list[str])
                 int(data.get("enabled", 0)),
                 1,
                 int(data.get("continue_on_failure", 0)),
+                data.get("owner", ""),
+                data.get("purpose", ""),
+                data.get("scope", ""),
+                data.get("environment", "local"),
+                data.get("risk_level", "low"),
+                data.get("expires_at"),
                 data.get("run_user"),
                 data.get("work_start"),
                 data.get("work_end"),

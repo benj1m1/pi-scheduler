@@ -239,6 +239,92 @@ def test_parse_skill_ids_normalizes_repeated_and_newline_values():
     assert approved_skills.parse_skill_ids(["pdf", "", "obsidian-markdown"]) == ["pdf", "obsidian-markdown"]
 
 
+def test_governance_migration_defaults_and_settings(tmp_path, monkeypatch):
+    from app import governance
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "agent",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+        }
+    )
+    group_id = db.create_group(
+        {"name": "flow", "cron_expr": "*/10 * * * *", "enabled": 1},
+        [job_id],
+    )
+
+    job = db.get_job(job_id)
+    group = db.get_group(group_id)
+    assert job["owner"] == ""
+    assert job["purpose"] == ""
+    assert job["scope"] == ""
+    assert job["environment"] == "local"
+    assert job["risk_level"] == "low"
+    assert job["expires_at"] is None
+    assert group["environment"] == "local"
+    assert group["risk_level"] == "low"
+    assert group["expires_at"] is None
+    assert governance.pause_status()["paused"] is False
+
+
+def test_governance_validation_and_expiration_helpers():
+    from datetime import date
+    from app import governance
+
+    assert governance.normalize_expires_at("") is None
+    assert governance.normalize_expires_at("2026-07-04") == "2026-07-04"
+    assert "Environment is invalid" in governance.validate_metadata({"environment": "prod", "risk_level": "low"})
+    assert "Risk level is invalid" in governance.validate_metadata({"environment": "local", "risk_level": "critical"})
+    assert "Expiration date must use YYYY-MM-DD" in governance.validate_metadata(
+        {"environment": "local", "risk_level": "low", "expires_at": "07/04/2026"}
+    )
+    assert governance.is_expired("2026-07-03", today=date(2026, 7, 4)) is True
+    assert governance.is_expired("2026-07-04", today=date(2026, 7, 4)) is False
+    assert governance.is_expired(None, today=date(2026, 7, 4)) is False
+
+
+def test_audit_event_round_trip(tmp_path, monkeypatch):
+    from app import governance
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    db.init_db()
+    event_id = governance.record_audit_event(
+        actor="admin",
+        event_type="job.created",
+        target_type="job",
+        target_id="agent",
+        summary="Created job agent",
+        before=None,
+        after={"name": "agent"},
+        source_ip="127.0.0.1",
+    )
+
+    events = governance.list_audit_events(limit=10)
+    assert events[0]["id"] == event_id
+    assert events[0]["actor"] == "admin"
+    assert events[0]["event_type"] == "job.created"
+    assert events[0]["target_type"] == "job"
+    assert events[0]["target_id"] == "agent"
+    assert events[0]["summary"] == "Created job agent"
+    assert events[0]["after"]["name"] == "agent"
+    assert events[0]["source_ip"] == "127.0.0.1"
+
+
 def test_form_context_excludes_default_run_user_from_explicit_choices(monkeypatch):
     monkeypatch.setattr(config, "CRON_USER", "pi-scheduler-agent")
     monkeypatch.setattr(config, "ALLOWED_RUN_USERS", "root,pi-scheduler-agent", raising=False)
