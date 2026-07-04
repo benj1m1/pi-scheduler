@@ -21,7 +21,7 @@
     </dd>
     <dt>Model</dt><dd>{{ job.provider_name ~ '/' ~ job.model_id if job.provider_name and job.model_id else 'Pi default' }}</dd>
     <dt>Output</dt><dd>{{ 'Detailed event log' if job.output_mode == 'events' else 'Summary only' }}</dd>
-    <dt>Pi session</dt><dd>{{ 'saved' if job.session_mode == 'save' else 'not saved' }}</dd>
+    <dt>Pi session</dt><dd>{{ 'stable job session' if job.session_mode == 'continue' else 'saved per run' if job.session_mode == 'save' else 'not saved' }}</dd>
     <dt>Tool access</dt><dd>{{ 'Read-only tools' if job.tool_mode == 'read_only' else 'No tools' if job.tool_mode == 'no_tools' else 'Full tools' }}</dd>
     <dt>Skills</dt><dd>{{ job|describe_job_skills }}</dd>
     <dt>Schedule</dt><dd>{{ job.cron_expr|describe_cron }}</dd>

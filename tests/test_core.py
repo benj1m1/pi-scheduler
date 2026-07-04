@@ -586,6 +586,9 @@ def test_job_form_uses_progressive_disclosure(tmp_path, monkeypatch):
     assert "Governance" in html
     assert "Advanced execution settings" in html
     assert '<details class="form-section advanced-section"' in html
+    assert "Do not save session" in html
+    assert "Save each run as a session" in html
+    assert "Continue a stable job session" in html
     assert "Pi model" in html
 
 
@@ -1032,6 +1035,45 @@ def test_build_command_supports_summary_without_session():
     assert "--mode json" not in display
 
 
+def test_build_command_supports_stable_job_session():
+    argv, display = runner.build_command(
+        {
+            "id": "daily-agent",
+            "name": "Daily Agent",
+            "task_prompt": "summarize status",
+            "output_mode": "summary",
+            "session_mode": "continue",
+        }
+    )
+
+    assert argv == [
+        "pi",
+        "--no-skills",
+        "--session-id",
+        "pi-scheduler-job-daily-agent",
+        "--name",
+        "pi-scheduler: Daily Agent",
+        "-p",
+        "summarize status",
+    ]
+    assert "--session-id pi-scheduler-job-daily-agent" in display
+    assert "--no-session" not in display
+
+
+def test_build_command_stable_session_uses_name_when_id_is_missing():
+    argv, _ = runner.build_command(
+        {
+            "name": "Daily Agent!",
+            "task_prompt": "summarize status",
+            "output_mode": "summary",
+            "session_mode": "continue",
+        }
+    )
+
+    assert "--session-id" in argv
+    assert argv[argv.index("--session-id") + 1] == "pi-scheduler-job-daily-agent"
+
+
 def test_build_command_supports_read_only_tools():
     argv, display = runner.build_command(
         {
@@ -1069,6 +1111,26 @@ def test_build_command_supports_no_tools():
 
     assert argv == ["pi", "--no-skills", "--no-session", "--no-tools", "-p", "summarize status"]
     assert "--no-tools" in display
+
+
+def test_validate_job_form_accepts_stable_session_mode():
+    data = {
+        "name": "pi-agent",
+        "task_prompt": "check logs",
+        "cron_expr": "*/5 * * * *",
+        "provider_name": None,
+        "model_id": None,
+        "work_start": None,
+        "work_end": None,
+        "output_mode": "summary",
+        "session_mode": "continue",
+        "tool_mode": "full",
+        "skills_mode": "none",
+        "skill_paths": "",
+        "timeout_seconds": "240",
+    }
+
+    assert web.validate_job_form(data) == []
 
 
 def test_validate_job_form_rejects_invalid_tool_mode():

@@ -35,7 +35,13 @@ def output_mode(job: dict) -> str:
 
 
 def session_mode(job: dict) -> str:
-    return "no_session" if job.get("session_mode") == "no_session" else "save"
+    value = job.get("session_mode")
+    return value if value in {"no_session", "save", "continue"} else "save"
+
+
+def stable_session_id(job: dict) -> str:
+    source = str(job.get("id") or job.get("name") or "job")
+    return f"pi-scheduler-job-{db.slugify(source)}"
 
 
 def tool_mode(job: dict) -> str:
@@ -65,8 +71,11 @@ def build_command(job: dict, validate_model: bool = True) -> tuple[list[str], st
             except approved_skills.SkillCatalogError as exc:
                 raise RunnerConfigError(f"Approved skill {skill_id!r} is not available") from exc
             argv.extend(["--skill", str(path)])
-    if session_mode(job) == "no_session":
+    selected_session_mode = session_mode(job)
+    if selected_session_mode == "no_session":
         argv.append("--no-session")
+    elif selected_session_mode == "continue":
+        argv.extend(["--session-id", stable_session_id(job)])
     selected_tool_mode = tool_mode(job)
     if selected_tool_mode == "read_only":
         argv.extend(["--tools", "read,grep,find,ls"])

@@ -96,6 +96,12 @@ New jobs default to:
 - No skills (`--no-skills`)
 - Overlap prevention enabled
 
+Session options:
+
+- **Do not save session**: adds `--no-session`.
+- **Save each run as a session**: saves a named Pi session for each run.
+- **Continue a stable job session**: uses `--session-id pi-scheduler-job-<job-id>` so each loop continues the same job session.
+
 When a provider/model is selected, the runner validates it against `~/.pi/agent/models.json` before invoking Pi.
 
 ### Run users

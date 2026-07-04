@@ -118,11 +118,12 @@
           <p class="hint">Summary only uses <code>pi -p</code>. Detailed event log uses <code>pi --mode json</code> and stores the raw Pi event stream.</p>
           <label>Session
             <select name="session_mode" required>
-              <option value="no_session" {% if job.session_mode == 'no_session' %}selected{% endif %}>Do not save Pi session</option>
-              <option value="save" {% if job.session_mode == 'save' %}selected{% endif %}>Save Pi session</option>
+              <option value="no_session" {% if job.session_mode == 'no_session' %}selected{% endif %}>Do not save session</option>
+              <option value="save" {% if job.session_mode == 'save' %}selected{% endif %}>Save each run as a session</option>
+              <option value="continue" {% if job.session_mode == 'continue' %}selected{% endif %}>Continue a stable job session</option>
             </select>
           </label>
-          <p class="hint">Saved sessions are named <code>pi-scheduler: {{ job.name or 'job name' }}</code>.</p>
+          <p class="hint">Stable job sessions use a repeatable Pi session id for this scheduler job. Saved sessions are named <code>pi-scheduler: {{ job.name or 'job name' }}</code>.</p>
           <label>Tool access
             <select name="tool_mode" required>
               <option value="full" {% if job.tool_mode == 'full' %}selected{% endif %}>Full tools</option>

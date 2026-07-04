@@ -53,7 +53,7 @@ LOG_STATUS_FILTERS = {
     "timeout": "Timed out",
 }
 OUTPUT_MODES = {"summary", "events"}
-SESSION_MODES = {"save", "no_session"}
+SESSION_MODES = {"save", "no_session", "continue"}
 TOOL_MODES = {"full", "read_only", "no_tools"}
 SKILLS_MODES = {"none", "approved", "runtime"}
 
