@@ -689,6 +689,28 @@ def test_render_cron_file_adds_discovered_pi_node_bin_to_path(tmp_path, monkeypa
     assert path_line.index(str(pi_bin)) < path_line.index("/usr/local/bin")
 
 
+def test_runtime_setup_config_defaults():
+    assert config.RUNTIME_USER == "pi-scheduler-agent"
+    assert config.RUNTIME_GROUP == "pi-scheduler"
+    assert str(config.MODELS_SOURCE_FILE) == "/root/.pi/agent/models.json"
+
+
+def test_runtime_setup_reports_missing_runtime_user(monkeypatch):
+    from app import runtime_setup
+
+    monkeypatch.setattr(config, "RUNTIME_USER", "pi-scheduler-agent")
+
+    def missing_user(name):
+        raise KeyError(name)
+
+    monkeypatch.setattr(runtime_setup.pwd, "getpwnam", missing_user)
+
+    warnings = runtime_setup.check_runtime_setup()
+
+    assert any("Runtime user 'pi-scheduler-agent' does not exist" in warning for warning in warnings)
+    assert any("setup-runtime-user.sh" in warning for warning in warnings)
+
+
 def test_manual_runner_command_direct_when_already_target_user(monkeypatch):
     from app import run_users
 
