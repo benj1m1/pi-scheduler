@@ -144,6 +144,33 @@ Work windows use Beijing time (HH:MM). Leave both start and end as `All day` for
 - Cron runs outside the work window exit without invoking `pi` and without creating a run record.
 - Manual "Run Now" bypasses both the enabled toggle and the work window check.
 
+### Run Users
+
+Jobs and groups can optionally specify a Linux user to run as. Leave the field blank to use `PI_SCHEDULER_CRON_USER`.
+
+Standalone jobs use their own run user. Groups use the group run user for the whole pipeline; member job run users are ignored during group execution.
+
+For safety, non-default users must be allowlisted:
+
+```bash
+PI_SCHEDULER_ALLOWED_RUN_USERS=root,piagent
+```
+
+A typical dedicated user setup:
+
+```bash
+sudo useradd --create-home --shell /bin/bash piagent
+sudo groupadd -f pi-scheduler
+sudo usermod -aG pi-scheduler piagent
+sudo chgrp -R pi-scheduler /opt/pi-scheduler/data /opt/pi-scheduler/logs /opt/pi-scheduler/locks /opt/pi-scheduler/tmp
+sudo chmod -R g+rwX /opt/pi-scheduler/data /opt/pi-scheduler/logs /opt/pi-scheduler/locks /opt/pi-scheduler/tmp
+sudo find /opt/pi-scheduler/data /opt/pi-scheduler/logs /opt/pi-scheduler/locks /opt/pi-scheduler/tmp -type d -exec chmod g+s {} \;
+```
+
+The run user needs Pi CLI credentials and model configuration under its own home directory, for example `/home/piagent/.pi/agent/`.
+
+Manual Run Now uses the configured run user by launching `bin/pi-job-runner --source manual`. If the web service runs as root, it switches users with `sudo -u` or `runuser`. If it cannot switch users, the manual run is rejected instead of running as the wrong user.
+
 ### Time Display
 
 Timestamps are stored in UTC (`2026-06-27T14:00:13Z`) and displayed as Beijing time (`2026-06-27 22:00:13 Beijing`).
@@ -216,7 +243,8 @@ locks/groups/<group-id>.lock       Per-group concurrency lock
 | `PI_MODELS_FILE` | `~/.pi/agent/models.json` | Read-only model config |
 | `PI_SCHEDULER_USERNAME` | `admin` | Basic Auth username |
 | `PI_SCHEDULER_PASSWORD` | `pi-scheduler` | Basic Auth password |
-| `PI_SCHEDULER_CRON_USER` | `root` | User in cron entries |
+| `PI_SCHEDULER_CRON_USER` | `root` | Default user in cron entries |
+| `PI_SCHEDULER_ALLOWED_RUN_USERS` | `<cron user>` | Comma-separated allowlist for per-job/per-group Linux run users. Empty means only `PI_SCHEDULER_CRON_USER` is allowed. |
 | `PI_SCHEDULER_LOG_RETENTION_DAYS` | `30` | Auto-cleanup cutoff |
 
 ## Database Schema
