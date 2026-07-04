@@ -561,6 +561,59 @@ def test_job_form_context_includes_catalog_and_selected_skill_ids(tmp_path, monk
     assert context["missing_skill_ids"] == ["missing"]
 
 
+def test_job_form_uses_progressive_disclosure(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+    db.init_db()
+    request = Request({"type": "http", "method": "GET", "path": "/jobs/new", "headers": []})
+    context = web.job_form_context(
+        request=request,
+        job={"name": "agent", "task_prompt": "check logs"},
+        errors=[],
+        action="/jobs",
+        title="New Job",
+    )
+
+    html = web.templates.env.get_template("job_form.html").render(context)
+
+    assert "form-section-primary" in html
+    assert "Basic" in html
+    assert "Schedule" in html
+    assert "Governance" in html
+    assert "Advanced execution settings" in html
+    assert '<details class="form-section advanced-section"' in html
+    assert "Pi model" in html
+
+
+def test_group_form_uses_progressive_disclosure(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+    db.init_db()
+    request = Request({"type": "http", "method": "GET", "path": "/groups/new", "headers": []})
+    context = web.group_form_context(
+        request=request,
+        group={"name": "flow", "member_job_ids": []},
+        errors=[],
+        action="/groups",
+        title="New Job Group",
+    )
+
+    html = web.templates.env.get_template("group_form.html").render(context)
+
+    assert "form-section-primary" in html
+    assert "Basic" in html
+    assert "Members" in html
+    assert "Schedule" in html
+    assert "Governance" in html
+    assert "Advanced group settings" in html
+    assert '<details class="form-section advanced-section"' in html
+    assert "Run user" in html
+
+
 def test_group_form_data_includes_run_user(monkeypatch):
     from app import run_users
 

@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 {% block title %}{{ title }} - Pi Scheduler{% endblock %}
 {% block content %}
-<section class="panel">
+<section class="panel form-page">
   <div class="section-head">
     <div>
       <p class="eyebrow">Job configuration</p>
       <h1>{{ title }}</h1>
-      <p class="hint">Define the prompt, model, schedule, and run safety settings.</p>
+      <p class="hint">Start with the prompt, schedule, and governance context. Advanced execution settings are available below.</p>
     </div>
   </div>
   {% if errors %}
@@ -14,89 +14,17 @@
     {% for error in errors %}<p>{{ error }}</p>{% endfor %}
   </div>
   {% endif %}
-  <form class="stack" method="post" action="{{ action }}">
-    <label>Name <input name="name" value="{{ job.name }}" required></label>
-    <label>Prompt <textarea name="task_prompt" required placeholder="Summarize the latest system status">{{ job.task_prompt }}</textarea></label>
-    <fieldset>
-      <legend>Pi model</legend>
-      <label>Provider / model
-        <select name="model_selection">
-          <option value="" {% if not job.model_selection %}selected{% endif %}>Use Pi default</option>
-          {% for option in model_options %}
-          <option value="{{ option.value }}" {% if job.model_selection == option.value %}selected{% endif %}>
-            {{ option.provider }}/{{ option.id }}{% if option.name != option.id %} - {{ option.name }}{% endif %}
-          </option>
-          {% endfor %}
-        </select>
-      </label>
-      <p class="hint">Options are read-only from <code>{{ models_file }}</code>.</p>
-      {% if model_config_error %}<p class="hint bad-text">{{ model_config_error }}</p>{% endif %}
+  <form class="stack progressive-form" method="post" action="{{ action }}">
+    <fieldset class="form-section form-section-primary">
+      <legend>Basic</legend>
+      <p class="hint section-hint">Name the job and describe the work the Pi agent should perform.</p>
+      <label>Name <input name="name" value="{{ job.name }}" required></label>
+      <label>Prompt <textarea name="task_prompt" required placeholder="Summarize the latest system status">{{ job.task_prompt }}</textarea></label>
     </fieldset>
-    <fieldset>
-      <legend>Run output</legend>
-      <label>Output mode
-        <select name="output_mode" required>
-          <option value="summary" {% if job.output_mode == 'summary' %}selected{% endif %}>Summary only</option>
-          <option value="events" {% if job.output_mode == 'events' %}selected{% endif %}>Detailed event log</option>
-        </select>
-      </label>
-      <p class="hint">Summary only uses <code>pi -p</code>. Detailed event log uses <code>pi --mode json</code> and stores the raw Pi event stream.</p>
-      <label>Session
-        <select name="session_mode" required>
-          <option value="no_session" {% if job.session_mode == 'no_session' %}selected{% endif %}>Do not save Pi session</option>
-          <option value="save" {% if job.session_mode == 'save' %}selected{% endif %}>Save Pi session</option>
-        </select>
-      </label>
-      <p class="hint">Saved sessions are named <code>pi-scheduler: {{ job.name or 'job name' }}</code>.</p>
-      <label>Tool access
-        <select name="tool_mode" required>
-          <option value="full" {% if job.tool_mode == 'full' %}selected{% endif %}>Full tools</option>
-          <option value="read_only" {% if job.tool_mode == 'read_only' %}selected{% endif %}>Read-only tools</option>
-          <option value="no_tools" {% if job.tool_mode == 'no_tools' %}selected{% endif %}>No tools</option>
-        </select>
-      </label>
-      <p class="hint">Read-only tools allow <code>read</code>, <code>grep</code>, <code>find</code>, and <code>ls</code>. No tools disables all Pi tools.</p>
-      <label>Skills policy
-        <select name="skills_mode" required>
-          <option value="none" {% if job.skills_mode == 'none' %}selected{% endif %}>No skills</option>
-          <option value="approved" {% if job.skills_mode == 'approved' %}selected{% endif %}>Approved skills</option>
-          <option value="runtime" {% if job.skills_mode == 'runtime' %}selected{% endif %}>Runtime user default skills</option>
-        </select>
-      </label>
-      <p class="hint">Default is <code>No skills</code>, which invokes <code>pi --no-skills</code>. Approved skills are loaded from the scheduler-managed catalog.</p>
-      <div class="field-block">
-        <p class="field-label">Approved skills catalog</p>
-        {% if approved_skills %}
-          <div class="checkbox-list">
-            {% for skill in approved_skills %}
-            <label class="checkbox-card">
-              <input type="checkbox" name="skill_ids" value="{{ skill.id }}" {% if skill.id in selected_skill_ids %}checked{% endif %}>
-              <span><strong>{{ skill.name }}</strong><small>{{ skill.id }}</small>{% if skill.description %}<em>{{ skill.description }}</em>{% endif %}</span>
-            </label>
-            {% endfor %}
-          </div>
-        {% else %}
-          <p class="hint warning-text">No approved skills are installed in the catalog.</p>
-        {% endif %}
-        {% if missing_skill_ids %}
-          <p class="hint bad-text">This job references missing approved skills: {{ missing_skill_ids|join(', ') }}.</p>
-        {% endif %}
-      </div>
-    </fieldset>
-    <fieldset>
-      <legend>Run user</legend>
-      <label>Run as user
-        <select name="run_user">
-          <option value="" {% if not job.run_user or job.run_user == default_run_user %}selected{% endif %}>Default ({{ default_run_user }})</option>
-          {% for user in allowed_run_users %}
-          <option value="{{ user }}" {% if job.run_user == user %}selected{% endif %}>{{ user }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <p class="hint">Scheduled and manual runs use this Linux user. Leave as default to use <code>{{ default_run_user }}</code>.</p>
-    </fieldset>
-    <fieldset>
+
+    <fieldset class="form-section form-section-primary">
       <legend>Schedule</legend>
+      <p class="hint section-hint">Choose how often cron should check this job and optionally limit it to a Beijing-time work window.</p>
       <div class="inline-fields">
         <label>Every <input name="schedule_every" type="number" min="1" max="59" value="{{ job.schedule_every }}" required></label>
         <label>Unit
@@ -107,11 +35,8 @@
         </label>
       </div>
       <p class="hint">Runs as app-owned cron. Minutes support 1-59; hours support 1-23.</p>
-    </fieldset>
-    <fieldset>
-      <legend>Work window</legend>
       <div class="inline-fields">
-        <label>Start
+        <label>Work window start
           <select id="work-start" name="work_start">
             <option value="" {% if not job.work_start %}selected{% endif %}>All day</option>
             {% for option in hour_options %}
@@ -119,7 +44,7 @@
             {% endfor %}
           </select>
         </label>
-        <label>End
+        <label>Work window end
           <select id="work-end" name="work_end">
             <option value="" {% if not job.work_end %}selected{% endif %}>All day</option>
             {% for option in hour_options %}
@@ -128,35 +53,135 @@
           </select>
         </label>
       </div>
-      <p class="hint">Uses Beijing time. Leave both as All day for no work-window limit. The start hour is included; the end hour is excluded.</p>
+      <p class="hint">Leave both as All day for no work-window limit. The start hour is included; the end hour is excluded.</p>
       <p id="work-window-status" class="window-status" aria-live="polite"></p>
     </fieldset>
-    <fieldset>
+
+    <fieldset class="form-section form-section-primary">
       <legend>Governance</legend>
-      <label>Owner <input type="text" name="owner" value="{{ job.owner }}" placeholder="Human owner"></label>
+      <p class="hint section-hint">Document ownership, scope, risk, and expiration before enabling unattended execution.</p>
+      <div class="form-grid-two">
+        <label>Owner <input type="text" name="owner" value="{{ job.owner }}" placeholder="Human owner"></label>
+        <label>Environment
+          <select name="environment" required>
+            {% for value in environment_options %}
+            <option value="{{ value }}" {% if job.environment == value %}selected{% endif %}>{{ value }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Risk level
+          <select name="risk_level" required>
+            {% for value in risk_level_options %}
+            <option value="{{ value }}" {% if job.risk_level == value %}selected{% endif %}>{{ value }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Expires at <input type="date" name="expires_at" value="{{ job.expires_at }}"></label>
+      </div>
       <label>Purpose <textarea name="purpose" rows="2" placeholder="Why this automation exists">{{ job.purpose }}</textarea></label>
       <label>Scope / boundaries <textarea name="scope" rows="2" placeholder="Allowed systems, data, and boundaries">{{ job.scope }}</textarea></label>
-      <label>Environment
-        <select name="environment" required>
-          {% for value in environment_options %}
-          <option value="{{ value }}" {% if job.environment == value %}selected{% endif %}>{{ value }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <label>Risk level
-        <select name="risk_level" required>
-          {% for value in risk_level_options %}
-          <option value="{{ value }}" {% if job.risk_level == value %}selected{% endif %}>{{ value }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <label>Expires at <input type="date" name="expires_at" value="{{ job.expires_at }}"></label>
       <p class="hint">Expiration is checked using Beijing dates. Expired jobs do not execute.</p>
     </fieldset>
-    <label>Timeout seconds <input name="timeout_seconds" type="number" min="10" max="3600" value="{{ job.timeout_seconds }}" required></label>
-    <label class="check"><input type="checkbox" name="enabled" {% if job.enabled %}checked{% endif %}> Enabled</label>
-    <label class="check forced-check"><input type="checkbox" name="prevent_overlap" checked disabled> Prevent overlap</label>
-    <div class="actions">
+
+    <details class="form-section advanced-section">
+      <summary>
+        <span>
+          <strong>Advanced execution settings</strong>
+          <small>Model, output mode, tools, skills, run user, timeout, and toggles.</small>
+        </span>
+      </summary>
+      <div class="advanced-section-body">
+        <fieldset>
+          <legend>Pi model</legend>
+          <label>Provider / model
+            <select name="model_selection">
+              <option value="" {% if not job.model_selection %}selected{% endif %}>Use Pi default</option>
+              {% for option in model_options %}
+              <option value="{{ option.value }}" {% if job.model_selection == option.value %}selected{% endif %}>
+                {{ option.provider }}/{{ option.id }}{% if option.name != option.id %} - {{ option.name }}{% endif %}
+              </option>
+              {% endfor %}
+            </select>
+          </label>
+          <p class="hint">Options are read-only from <code>{{ models_file }}</code>.</p>
+          {% if model_config_error %}<p class="hint bad-text">{{ model_config_error }}</p>{% endif %}
+        </fieldset>
+
+        <fieldset>
+          <legend>Run output</legend>
+          <label>Output mode
+            <select name="output_mode" required>
+              <option value="summary" {% if job.output_mode == 'summary' %}selected{% endif %}>Summary only</option>
+              <option value="events" {% if job.output_mode == 'events' %}selected{% endif %}>Detailed event log</option>
+            </select>
+          </label>
+          <p class="hint">Summary only uses <code>pi -p</code>. Detailed event log uses <code>pi --mode json</code> and stores the raw Pi event stream.</p>
+          <label>Session
+            <select name="session_mode" required>
+              <option value="no_session" {% if job.session_mode == 'no_session' %}selected{% endif %}>Do not save Pi session</option>
+              <option value="save" {% if job.session_mode == 'save' %}selected{% endif %}>Save Pi session</option>
+            </select>
+          </label>
+          <p class="hint">Saved sessions are named <code>pi-scheduler: {{ job.name or 'job name' }}</code>.</p>
+          <label>Tool access
+            <select name="tool_mode" required>
+              <option value="full" {% if job.tool_mode == 'full' %}selected{% endif %}>Full tools</option>
+              <option value="read_only" {% if job.tool_mode == 'read_only' %}selected{% endif %}>Read-only tools</option>
+              <option value="no_tools" {% if job.tool_mode == 'no_tools' %}selected{% endif %}>No tools</option>
+            </select>
+          </label>
+          <p class="hint">Read-only tools allow <code>read</code>, <code>grep</code>, <code>find</code>, and <code>ls</code>. No tools disables all Pi tools.</p>
+        </fieldset>
+
+        <fieldset>
+          <legend>Skills policy</legend>
+          <label>Skills policy
+            <select name="skills_mode" required>
+              <option value="none" {% if job.skills_mode == 'none' %}selected{% endif %}>No skills</option>
+              <option value="approved" {% if job.skills_mode == 'approved' %}selected{% endif %}>Approved skills</option>
+              <option value="runtime" {% if job.skills_mode == 'runtime' %}selected{% endif %}>Runtime user default skills</option>
+            </select>
+          </label>
+          <p class="hint">Default is <code>No skills</code>, which invokes <code>pi --no-skills</code>. Approved skills are loaded from the scheduler-managed catalog.</p>
+          <div class="field-block">
+            <p class="field-label">Approved skills catalog</p>
+            {% if approved_skills %}
+              <div class="checkbox-list">
+                {% for skill in approved_skills %}
+                <label class="checkbox-card">
+                  <input type="checkbox" name="skill_ids" value="{{ skill.id }}" {% if skill.id in selected_skill_ids %}checked{% endif %}>
+                  <span><strong>{{ skill.name }}</strong><small>{{ skill.id }}</small>{% if skill.description %}<em>{{ skill.description }}</em>{% endif %}</span>
+                </label>
+                {% endfor %}
+              </div>
+            {% else %}
+              <p class="hint warning-text">No approved skills are installed in the catalog.</p>
+            {% endif %}
+            {% if missing_skill_ids %}
+              <p class="hint bad-text">This job references missing approved skills: {{ missing_skill_ids|join(', ') }}.</p>
+            {% endif %}
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Run user and limits</legend>
+          <label>Run as user
+            <select name="run_user">
+              <option value="" {% if not job.run_user or job.run_user == default_run_user %}selected{% endif %}>Default ({{ default_run_user }})</option>
+              {% for user in allowed_run_users %}
+              <option value="{{ user }}" {% if job.run_user == user %}selected{% endif %}>{{ user }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <p class="hint">Scheduled and manual runs use this Linux user. Leave as default to use <code>{{ default_run_user }}</code>.</p>
+          <label>Timeout seconds <input name="timeout_seconds" type="number" min="10" max="3600" value="{{ job.timeout_seconds }}" required></label>
+          <label class="check"><input type="checkbox" name="enabled" {% if job.enabled %}checked{% endif %}> Enabled</label>
+          <label class="check forced-check"><input type="checkbox" name="prevent_overlap" checked disabled> Prevent overlap</label>
+        </fieldset>
+      </div>
+    </details>
+
+    <div class="actions form-actions-sticky">
       <button class="primary" type="submit">Save</button>
       <a class="button" href="/">Cancel</a>
     </div>

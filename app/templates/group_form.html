@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 {% block title %}{{ title }} - Pi Scheduler{% endblock %}
 {% block content %}
-<section class="panel">
+<section class="panel form-page">
   <div class="section-head">
     <div>
       <p class="eyebrow">Group configuration</p>
       <h1>{{ title }}</h1>
-      <p class="hint">Schedule existing jobs as a linear chain. Group timing controls when the chain starts; member jobs keep their own prompt, model, timeout, tools, and log paths.</p>
+      <p class="hint">Schedule existing jobs as a linear chain. Start with members, timing, and governance; advanced behavior is below.</p>
     </div>
   </div>
   {% if errors %}
@@ -14,11 +14,16 @@
     {% for error in errors %}<p>{{ error }}</p>{% endfor %}
   </div>
   {% endif %}
-  <form class="stack" method="post" action="{{ action }}">
-    <label>Name <input name="name" value="{{ group.name }}" required></label>
-    <fieldset>
+  <form class="stack progressive-form" method="post" action="{{ action }}">
+    <fieldset class="form-section form-section-primary">
+      <legend>Basic</legend>
+      <p class="hint section-hint">Name the group so it is easy to identify in logs and audit history.</p>
+      <label>Name <input name="name" value="{{ group.name }}" required></label>
+    </fieldset>
+
+    <fieldset class="form-section form-section-primary">
       <legend>Members</legend>
-      <p class="hint">Add one job per step, then drag rows to set execution order. The same job can only appear once.</p>
+      <p class="hint section-hint">Add one job per step, then drag rows to set execution order. The same job can only appear once.</p>
       <div id="member-list" class="member-list" aria-live="polite">
         {% for selected_job_id in member_job_ids %}
         <div class="member-row" data-member-row>
@@ -59,20 +64,10 @@
         </div>
       </template>
     </fieldset>
-    <fieldset>
-      <legend>Run user</legend>
-      <label>Run as user
-        <select name="run_user">
-          <option value="" {% if not group.run_user or group.run_user == default_run_user %}selected{% endif %}>Default ({{ default_run_user }})</option>
-          {% for user in allowed_run_users %}
-          <option value="{{ user }}" {% if group.run_user == user %}selected{% endif %}>{{ user }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <p class="hint">The whole group runs as this Linux user. Member job run users are ignored during group execution.</p>
-    </fieldset>
-    <fieldset>
+
+    <fieldset class="form-section form-section-primary">
       <legend>Schedule</legend>
+      <p class="hint section-hint">Group timing controls when the chain starts. Member job work windows do not gate group execution.</p>
       <div class="inline-fields">
         <label>Every <input name="schedule_every" type="number" min="1" max="59" value="{{ group.schedule_every }}" required></label>
         <label>Unit
@@ -83,11 +78,8 @@
         </label>
       </div>
       <p class="hint">Runs as app-owned cron. Minutes support 1-59; hours support 1-23.</p>
-    </fieldset>
-    <fieldset>
-      <legend>Work window</legend>
       <div class="inline-fields">
-        <label>Start
+        <label>Work window start
           <select id="work-start" name="work_start">
             <option value="" {% if not group.work_start %}selected{% endif %}>All day</option>
             {% for option in hour_options %}
@@ -95,7 +87,7 @@
             {% endfor %}
           </select>
         </label>
-        <label>End
+        <label>Work window end
           <select id="work-end" name="work_end">
             <option value="" {% if not group.work_end %}selected{% endif %}>All day</option>
             {% for option in hour_options %}
@@ -104,36 +96,66 @@
           </select>
         </label>
       </div>
-      <p class="hint">Uses Beijing time. Member job work windows do not gate group execution.</p>
       <p id="work-window-status" class="window-status" aria-live="polite"></p>
     </fieldset>
-    <fieldset>
+
+    <fieldset class="form-section form-section-primary">
       <legend>Governance</legend>
-      <label>Owner <input type="text" name="owner" value="{{ group.owner }}" placeholder="Human owner"></label>
+      <p class="hint section-hint">Document ownership, scope, risk, and expiration for the full chain.</p>
+      <div class="form-grid-two">
+        <label>Owner <input type="text" name="owner" value="{{ group.owner }}" placeholder="Human owner"></label>
+        <label>Environment
+          <select name="environment" required>
+            {% for value in environment_options %}
+            <option value="{{ value }}" {% if group.environment == value %}selected{% endif %}>{{ value }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Risk level
+          <select name="risk_level" required>
+            {% for value in risk_level_options %}
+            <option value="{{ value }}" {% if group.risk_level == value %}selected{% endif %}>{{ value }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Expires at <input type="date" name="expires_at" value="{{ group.expires_at }}"></label>
+      </div>
       <label>Purpose <textarea name="purpose" rows="2" placeholder="Why this automation exists">{{ group.purpose }}</textarea></label>
       <label>Scope / boundaries <textarea name="scope" rows="2" placeholder="Allowed systems, data, and boundaries">{{ group.scope }}</textarea></label>
-      <label>Environment
-        <select name="environment" required>
-          {% for value in environment_options %}
-          <option value="{{ value }}" {% if group.environment == value %}selected{% endif %}>{{ value }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <label>Risk level
-        <select name="risk_level" required>
-          {% for value in risk_level_options %}
-          <option value="{{ value }}" {% if group.risk_level == value %}selected{% endif %}>{{ value }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <label>Expires at <input type="date" name="expires_at" value="{{ group.expires_at }}"></label>
       <p class="hint">Expiration is checked using Beijing dates. Expired groups do not execute.</p>
     </fieldset>
-    <label class="check"><input type="checkbox" name="enabled" {% if group.enabled %}checked{% endif %}> Enabled</label>
-    <label class="check"><input type="checkbox" name="continue_on_failure" {% if group.continue_on_failure %}checked{% endif %}> Continue after failed steps</label>
-    <p class="hint">When enabled, later members still run after a failed, timed out, or overlap-skipped step. The group run is still marked failed if any step fails.</p>
-    <label class="check forced-check"><input type="checkbox" name="prevent_overlap" checked disabled> Prevent overlap</label>
-    <div class="actions">
+
+    <details class="form-section advanced-section">
+      <summary>
+        <span>
+          <strong>Advanced group settings</strong>
+          <small>Run user, failure policy, enabled state, and overlap prevention.</small>
+        </span>
+      </summary>
+      <div class="advanced-section-body">
+        <fieldset>
+          <legend>Run user</legend>
+          <label>Run as user
+            <select name="run_user">
+              <option value="" {% if not group.run_user or group.run_user == default_run_user %}selected{% endif %}>Default ({{ default_run_user }})</option>
+              {% for user in allowed_run_users %}
+              <option value="{{ user }}" {% if group.run_user == user %}selected{% endif %}>{{ user }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <p class="hint">The whole group runs as this Linux user. Member job run users are ignored during group execution.</p>
+        </fieldset>
+        <fieldset>
+          <legend>Execution behavior</legend>
+          <label class="check"><input type="checkbox" name="enabled" {% if group.enabled %}checked{% endif %}> Enabled</label>
+          <label class="check"><input type="checkbox" name="continue_on_failure" {% if group.continue_on_failure %}checked{% endif %}> Continue after failed steps</label>
+          <p class="hint">When enabled, later members still run after a failed, timed out, or overlap-skipped step. The group run is still marked failed if any step fails.</p>
+          <label class="check forced-check"><input type="checkbox" name="prevent_overlap" checked disabled> Prevent overlap</label>
+        </fieldset>
+      </div>
+    </details>
+
+    <div class="actions form-actions-sticky">
       <button class="primary" type="submit">Save</button>
       <a class="button" href="/">Cancel</a>
     </div>
