@@ -6,7 +6,7 @@ os.environ.setdefault("PI_SCHEDULER_CRON_FILE", "/tmp/pi-agent-jobs-test")
 
 from starlette.requests import Request
 
-from app import config, cron, db, pi_models, retention, runner
+from app import config, cron, db, pi_models, retention, runner, run_users
 from app import main as web
 from app import work_window
 
@@ -950,7 +950,7 @@ def test_render_cron_file_uses_lightweight_job_query(tmp_path, monkeypatch):
     content = cron.render_cron_file()
 
     assert jobs
-    assert all(set(job) == {"id", "cron_expr", "enabled", "deleted_at"} for job in jobs)
+    assert all(set(job) == {"id", "cron_expr", "enabled", "deleted_at", "run_user"} for job in jobs)
     assert f"--job-id {enabled_id}" in content
     assert f"--job-id {disabled_id}" not in content
     assert f"--job-id {deleted_id}" not in content
@@ -990,7 +990,7 @@ def test_render_cron_file_uses_lightweight_group_query(tmp_path, monkeypatch):
     content = cron.render_cron_file()
 
     assert groups
-    assert all(set(group) == {"id", "cron_expr", "enabled", "deleted_at"} for group in groups)
+    assert all(set(group) == {"id", "cron_expr", "enabled", "deleted_at", "run_user"} for group in groups)
     assert f"--group-id {enabled_group_id}" in content
     assert f"--group-id {disabled_group_id}" not in content
 
@@ -2148,7 +2148,11 @@ def test_manual_run_queues_background_task(tmp_path, monkeypatch):
 
     assert response.status_code == 303
     assert response.headers["location"] == f"/jobs/{job_id}?queued=1"
-    assert tasks.calls == [(runner.run_job, (job_id,), {"source": "manual"})]
+    assert tasks.calls == [(
+        run_users.launch_command,
+        ([config.RUNNER_PATH, "--job-id", job_id, "--source", "manual"],),
+        {},
+    )]
 
 
 def test_manual_run_from_index_returns_to_index(tmp_path, monkeypatch):
@@ -2182,7 +2186,11 @@ def test_manual_run_from_index_returns_to_index(tmp_path, monkeypatch):
 
     assert response.status_code == 303
     assert response.headers["location"] == f"/?queued={job_id}"
-    assert tasks.calls == [(runner.run_job, (job_id,), {"source": "manual"})]
+    assert tasks.calls == [(
+        run_users.launch_command,
+        ([config.RUNNER_PATH, "--job-id", job_id, "--source", "manual"],),
+        {},
+    )]
 
 
 def test_manual_group_run_queues_background_task(tmp_path, monkeypatch):
@@ -2219,7 +2227,11 @@ def test_manual_group_run_queues_background_task(tmp_path, monkeypatch):
 
     assert response.status_code == 303
     assert response.headers["location"] == f"/?queued={group_id}"
-    assert tasks.calls == [(runner.run_group, (group_id,), {"source": "manual"})]
+    assert tasks.calls == [(
+        run_users.launch_command,
+        ([config.RUNNER_PATH, "--group-id", group_id, "--source", "manual"],),
+        {},
+    )]
 
 
 def test_running_group_run_detail_auto_refreshes(tmp_path, monkeypatch):
