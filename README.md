@@ -88,9 +88,20 @@ Ensure the system cron daemon is running:
 sudo systemctl status cron --no-pager
 ```
 
+## Web UI Workflow
+
+The dashboard is designed for quick operational checks:
+
+- The header shows the scheduler state (`active` or `paused`). Open the compact **Scheduler** control to pause or resume all automatic and manual execution.
+- The homepage lists jobs and groups as compact cards with owner, environment, risk, run user, schedule, next check, and latest run status.
+- Job and group forms use progressive disclosure: basic setup, schedule, and governance fields are visible first; advanced execution settings are collapsed until needed.
+- `/logs` is the run-history workspace for filtering, viewing transcripts, and cleaning old run records.
+- `/audit` is a governance activity feed for administrative changes, manual run requests, and pause/resume events.
+- `/cron` is a read-only activation check that compares generated cron content with the managed cron file and cron service status.
+
 ## Jobs
 
-Each job represents one Pi agent invocation with a prompt, schedule, and execution configuration.
+Each job represents one Pi agent invocation with a prompt, schedule, and execution configuration. The form keeps the common path short: name, prompt, schedule, and governance metadata are shown first, while model/tool/skills/run-user settings are under **Advanced execution settings**.
 
 ### Scheduling
 
@@ -199,10 +210,10 @@ Manual Run Now uses the configured run user by launching `bin/pi-job-runner --so
 
 Pi Scheduler includes governance controls for scheduled Pi agents:
 
-- **Global pause** stops automatic cron execution and manual Run Now requests. The runner also checks pause state before invoking Pi, so stale cron entries and direct runner calls are blocked.
+- **Global pause** stops automatic cron execution and manual Run Now requests. The runner also checks pause state before invoking Pi, so stale cron entries and direct runner calls are blocked. The compact **Scheduler** control in the header is the primary pause/resume entry point.
 - **Governance metadata** lets jobs and groups document owner, purpose, scope, environment, risk level, and expiration date.
 - **Expiration** uses `YYYY-MM-DD` Beijing-date semantics. Expired jobs and groups are not executed by cron, manual runs, or direct runner invocation.
-- **Audit logs** record administrative changes, manual run requests, and pause/resume events.
+- **Audit logs** record administrative changes, manual run requests, and pause/resume events. The `/audit` page presents these events as an activity feed with expandable before/after details.
 
 These controls support accountability, scoped execution, traceability, and emergency disablement.
 
@@ -212,7 +223,7 @@ Timestamps are stored in UTC (`2026-06-27T14:00:13Z`) and displayed as Beijing t
 
 ## Job Groups
 
-Groups execute multiple jobs sequentially as a pipeline. Each member is an existing job — groups do not define new jobs, they chain existing ones.
+Groups execute multiple jobs sequentially as a pipeline. Each member is an existing job — groups do not define new jobs, they chain existing ones. The group form highlights the member chain, schedule, and governance metadata first; run user and failure-policy options live under **Advanced group settings**.
 
 ### Key Behaviors
 
@@ -293,7 +304,7 @@ locks/groups/<group-id>.lock       Per-group concurrency lock
 
 ## Database Schema
 
-Six SQLite tables with inline, idempotent migrations in `init_db()`:
+Eight SQLite tables with inline, idempotent migrations in `init_db()`:
 
 | Table | Purpose |
 |---|---|
@@ -322,7 +333,7 @@ All routes require Basic Auth.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/` | Dashboard: jobs + groups with latest run status |
+| GET | `/` | Dashboard: compact job/group cards with scheduler status in the header |
 | GET | `/jobs/new` | Create job form |
 | POST | `/jobs` | Create job |
 | GET | `/jobs/{id}` | Job detail with run history (live-polling) |
@@ -344,7 +355,7 @@ All routes require Basic Auth.
 | GET | `/runs/{rid}` | Single run detail (stdout, stderr, JSONL) |
 | GET | `/logs` | Filterable/paginated log viewer |
 | POST | `/logs/cleanup` | Manual log cleanup |
-| GET | `/audit` | Filterable audit log |
+| GET | `/audit` | Filterable governance activity feed |
 | POST | `/governance/pause` | Pause all scheduled and manual execution |
 | POST | `/governance/resume` | Resume scheduled and manual execution |
 | GET | `/cron` | Read-only cron file preview |
