@@ -46,7 +46,7 @@ deploy/run-local.sh
 Open `http://127.0.0.1:8080`, log in with `admin` / your password.  
 Default password is `pi-scheduler` if the env var is not set — change it before network exposure.
 
-`deploy/run-local.sh` prepares the dedicated runtime user `pi-scheduler-agent` when it can use root/sudo, grants scheduler runtime directory permissions, copies `/root/.pi/agent/models.json` when available, sets local run-user defaults, and writes local cron output to `tmp/pi-agent-jobs` instead of `/etc/cron.d`. The Cron Preview page will mark this as `preview_only` / "Automatic jobs are not active" because system cron does not read files under `tmp/`; scheduled jobs will not run automatically from that file.
+`deploy/run-local.sh` prepares the dedicated runtime user `pi-scheduler-agent`, grants scheduler runtime directory permissions, copies `/root/.pi/agent/models.json` when available, sets local run-user defaults, and writes cron output to `/etc/cron.d/pi-agent-jobs` so scheduled jobs run automatically. If started as a non-root user, it restarts itself with `sudo -E` because the web process must be able to update `/etc/cron.d/pi-agent-jobs` whenever jobs or groups change.
 
 ## Install on Ubuntu
 
@@ -216,16 +216,9 @@ The `/logs` page supports filtering by job, group, source, status, and date rang
 
 ### Cron Status
 
-The `/cron` page shows both the generated cron content and whether scheduled jobs should run automatically on the current host. Files under `/etc/cron.d` with matching generated content and an active cron service are shown as active. Local deploy defaults to `tmp/pi-agent-jobs`, which is shown as `preview_only` / "Automatic jobs are not active" because system cron does not read it automatically.
+The `/cron` page shows both the generated cron content and whether scheduled jobs should run automatically on the current host. Both local deploy (`deploy/run-local.sh`) and systemd deploy write `/etc/cron.d/pi-agent-jobs` by default, so the page should report `Automatic jobs are active` when the file exists, matches the generated preview, and the cron service is running.
 
-To make local deploy write the system cron file, start it with:
-
-```bash
-export PI_SCHEDULER_CRON_FILE=/etc/cron.d/pi-agent-jobs
-deploy/run-local.sh
-```
-
-or use the systemd deployment.
+If this page reports `Automatic jobs are not active`, check the target path first. Paths outside `/etc/cron.d` are not read by system cron unless you have separately configured cron to include them.
 
 ## Important Paths
 

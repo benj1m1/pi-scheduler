@@ -8,19 +8,23 @@ HOST="${HOST:-127.0.0.1}"
 PORT="${PORT:-8080}"
 SETUP_SCRIPT="${SCRIPT_DIR}/setup-runtime-user.sh"
 # Local deploy prepares the runtime user through deploy/setup-runtime-user.sh.
-# It then starts: uvicorn app.main:app
+# It runs the web process as root so Pi Scheduler can keep /etc/cron.d/pi-agent-jobs
+# updated on every job/group change while individual jobs run as pi-scheduler-agent.
 
-if [[ "${EUID}" -eq 0 ]]; then
-  "${SETUP_SCRIPT}" --home "${SCHEDULER_HOME}"
-elif command -v sudo >/dev/null 2>&1; then
-  sudo "${SETUP_SCRIPT}" --home "${SCHEDULER_HOME}"
-else
-  echo "Warning: sudo is not available; skipping runtime user setup." >&2
-  echo "Run as root: ${SETUP_SCRIPT} --home ${SCHEDULER_HOME}" >&2
+if [[ "${EUID}" -ne 0 ]]; then
+  if command -v sudo >/dev/null 2>&1; then
+    echo "Local deploy needs root to write /etc/cron.d/pi-agent-jobs; restarting with sudo." >&2
+    exec sudo -E "$0" "$@"
+  fi
+  echo "Error: local deploy needs root to write /etc/cron.d/pi-agent-jobs." >&2
+  echo "Install sudo or run as root: $0" >&2
+  exit 1
 fi
 
+"${SETUP_SCRIPT}" --home "${SCHEDULER_HOME}"
+
 export PI_SCHEDULER_HOME="${SCHEDULER_HOME}"
-export PI_SCHEDULER_CRON_FILE="${PI_SCHEDULER_CRON_FILE:-${SCHEDULER_HOME}/tmp/pi-agent-jobs}"
+export PI_SCHEDULER_CRON_FILE="${PI_SCHEDULER_CRON_FILE:-/etc/cron.d/pi-agent-jobs}"
 export PI_SCHEDULER_CRON_USER="${PI_SCHEDULER_CRON_USER:-pi-scheduler-agent}"
 export PI_SCHEDULER_ALLOWED_RUN_USERS="${PI_SCHEDULER_ALLOWED_RUN_USERS:-root,pi-scheduler-agent}"
 

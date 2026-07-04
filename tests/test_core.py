@@ -694,9 +694,12 @@ def test_run_local_script_syntax_and_defaults():
     assert script.exists()
     content = script.read_text(encoding="utf-8")
     assert "deploy/setup-runtime-user.sh" in content
+    assert 'PI_SCHEDULER_CRON_FILE="${PI_SCHEDULER_CRON_FILE:-/etc/cron.d/pi-agent-jobs}"' in content
     assert 'PI_SCHEDULER_CRON_USER="${PI_SCHEDULER_CRON_USER:-pi-scheduler-agent}"' in content
     assert 'PI_SCHEDULER_ALLOWED_RUN_USERS="${PI_SCHEDULER_ALLOWED_RUN_USERS:-root,pi-scheduler-agent}"' in content
-    assert "uvicorn app.main:app" in content
+    assert 'exec sudo -E "$0" "$@"' in content
+    assert "uvicorn" in content
+    assert "app.main:app" in content
 
 
 def test_setup_runtime_user_script_syntax_and_defaults():
