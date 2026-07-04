@@ -1653,42 +1653,6 @@ def test_job_detail_groups_options_by_risk(tmp_path, monkeypatch):
     assert "Runs as root" in html
 
 
-def test_job_detail_marks_individual_options_with_risk_badges(tmp_path, monkeypatch):
-    monkeypatch.setattr(web.config, "DATA_DIR", tmp_path / "data")
-    monkeypatch.setattr(web.config, "LOG_DIR", tmp_path / "logs")
-    monkeypatch.setattr(web.config, "LOCK_DIR", tmp_path / "locks")
-    monkeypatch.setattr(web.config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
-
-    db.init_db()
-    job_id = db.create_job(
-        {
-            "name": "badge-agent",
-            "skill_name": "general",
-            "task_prompt": "check logs",
-            "cron_expr": "*/5 * * * *",
-            "enabled": 1,
-            "timeout_seconds": 240,
-            "prevent_overlap": 1,
-            "output_mode": "summary",
-            "session_mode": "save",
-            "tool_mode": "full",
-            "skills_mode": "runtime",
-            "run_user": "root",
-        }
-    )
-
-    request = Request({"type": "http", "method": "GET", "path": f"/jobs/{job_id}", "headers": []})
-    response = web.job_detail(request, job_id)
-    html = web.templates.env.get_template("job_detail.html").render(response.context)
-
-    assert '<span class="option-risk option-risk-success">Low risk</span>' in html
-    assert '<span class="option-risk option-risk-warning">Medium risk</span>' in html
-    assert '<span class="option-risk option-risk-danger">High risk</span>' in html
-    assert 'Full tools <span class="option-risk option-risk-danger">High risk</span>' in html
-    assert 'Runtime user default skills <span class="option-risk option-risk-danger">High risk</span>' in html
-    assert 'root <span class="option-risk option-risk-danger">High risk</span>' in html
-
-
 def test_toggle_job_redirects_back_to_detail_when_requested(tmp_path, monkeypatch):
     monkeypatch.setattr(web.config, "DATA_DIR", tmp_path / "data")
     monkeypatch.setattr(web.config, "LOG_DIR", tmp_path / "logs")

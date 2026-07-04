@@ -300,23 +300,6 @@ p { line-height: 1.55; }
 .risk-list { display: grid; gap: 0.55rem; grid-template-columns: minmax(6.5rem, auto) minmax(0, 1fr); margin: 0; }
 .risk-list dt { color: inherit; font-weight: 900; opacity: 0.82; }
 .risk-list dd { color: inherit; font-weight: 750; margin: 0; overflow-wrap: anywhere; }
-.option-risk {
-  border: 1px solid currentColor;
-  border-radius: 999px;
-  display: inline-flex;
-  font-size: 0.74rem;
-  font-weight: 950;
-  letter-spacing: 0.04em;
-  line-height: 1;
-  margin-left: 0.45rem;
-  padding: 0.28rem 0.52rem;
-  text-transform: uppercase;
-  vertical-align: middle;
-  white-space: nowrap;
-}
-.option-risk-success { background: var(--success-bg); color: var(--success-text); }
-.option-risk-warning { background: var(--warning-bg); color: var(--warning-text); }
-.option-risk-danger { background: var(--danger-bg); color: var(--danger); }
 
 dl { display: grid; gap: 0.45rem 0.9rem; grid-template-columns: 6.5rem 1fr; margin: 0; }
 .wide { grid-template-columns: 8.5rem 1fr; }
