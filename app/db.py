@@ -39,6 +39,7 @@ def init_db() -> None:
               tool_mode text not null default 'full',
               skills_mode text not null default 'none',
               skill_paths text not null default '',
+              skill_ids text not null default '',
               run_user text,
               created_at text not null,
               updated_at text not null,
@@ -149,6 +150,8 @@ def init_db() -> None:
             conn.execute("alter table jobs add column skills_mode text not null default 'none'")
         if "skill_paths" not in columns:
             conn.execute("alter table jobs add column skill_paths text not null default ''")
+        if "skill_ids" not in columns:
+            conn.execute("alter table jobs add column skill_ids text not null default ''")
         if "run_user" not in columns:
             conn.execute("alter table jobs add column run_user text")
         run_columns = {row[1] for row in conn.execute("pragma table_info(runs)").fetchall()}
@@ -292,8 +295,8 @@ def create_job(data: dict[str, Any]) -> str:
             insert into jobs (
               id, name, skill_name, task_prompt, cron_expr, provider_name, model_id, enabled,
               work_start, work_end, timeout_seconds, prevent_overlap, output_mode, session_mode,
-              tool_mode, skills_mode, skill_paths, run_user, created_at, updated_at
-            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              tool_mode, skills_mode, skill_paths, skill_ids, run_user, created_at, updated_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 job_id,
@@ -313,6 +316,7 @@ def create_job(data: dict[str, Any]) -> str:
                 data.get("tool_mode", "full"),
                 data.get("skills_mode", "none"),
                 data.get("skill_paths", ""),
+                data.get("skill_ids", ""),
                 data.get("run_user"),
                 now,
                 now,
@@ -329,7 +333,7 @@ def update_job(job_id: str, data: dict[str, Any]) -> None:
             set name = ?, skill_name = ?, task_prompt = ?, cron_expr = ?, enabled = ?,
                 provider_name = ?, model_id = ?, work_start = ?, work_end = ?,
                 timeout_seconds = ?, prevent_overlap = ?, output_mode = ?, session_mode = ?,
-                tool_mode = ?, skills_mode = ?, skill_paths = ?, run_user = ?, updated_at = ?
+                tool_mode = ?, skills_mode = ?, skill_paths = ?, skill_ids = ?, run_user = ?, updated_at = ?
             where id = ? and deleted_at is null
             """,
             (
@@ -349,6 +353,7 @@ def update_job(job_id: str, data: dict[str, Any]) -> None:
                 data.get("tool_mode", "full"),
                 data.get("skills_mode", "none"),
                 data.get("skill_paths", ""),
+                data.get("skill_ids", ""),
                 data.get("run_user"),
                 utc_now(),
                 job_id,

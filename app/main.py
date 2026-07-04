@@ -14,7 +14,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import config, cron, cron_status, db, pi_models, retention, runner, run_users, runtime_setup, work_window
+from . import approved_skills, config, cron, cron_status, db, pi_models, retention, runner, run_users, runtime_setup, work_window
 
 
 app = FastAPI(title="Pi Scheduler")
@@ -263,13 +263,14 @@ def validate_job_form(data: dict) -> list[str]:
     if data.get("skills_mode") not in SKILLS_MODES:
         errors.append("Skills policy is invalid")
     if data.get("skills_mode") == "approved":
-        paths = [line.strip() for line in str(data.get("skill_paths") or "").splitlines() if line.strip()]
-        if not paths:
-            errors.append("At least one skill path is required for approved skills")
-        for path in paths:
-            if not Path(path).is_absolute():
-                errors.append("Skill paths must be absolute")
-                break
+        ids = approved_skills.parse_skill_ids(data.get("skill_ids"))
+        if not ids:
+            errors.append("At least one approved skill is required")
+        for skill_id in ids:
+            try:
+                approved_skills.resolve_skill_path(skill_id)
+            except approved_skills.SkillCatalogError:
+                errors.append(f"Approved skill {skill_id!r} is not available")
     try:
         timeout = int(data["timeout_seconds"])
         if timeout < 10 or timeout > 3600:
@@ -295,7 +296,7 @@ def form_data(
     enabled: str | None,
     prevent_overlap: str | None,
     skills_mode: str = "none",
-    skill_paths: str = "",
+    skill_ids: str | list[str] | None = None,
 ) -> dict:
     cron_expr = ""
     schedule_error = None
@@ -310,6 +311,7 @@ def form_data(
         provider_name, model_id = pi_models.decode_selection(model_selection)
     except pi_models.ModelConfigError as exc:
         model_error = str(exc)
+    selected_skill_ids = approved_skills.parse_skill_ids(skill_ids)
     return {
         "name": name.strip(),
         "skill_name": "general",
@@ -326,7 +328,8 @@ def form_data(
         "session_mode": session_mode,
         "tool_mode": tool_mode,
         "skills_mode": skills_mode,
-        "skill_paths": skill_paths.strip(),
+        "skill_ids": "\n".join(selected_skill_ids),
+        "skill_paths": "",
         "work_start": work_start.strip() or None,
         "work_end": work_end.strip() or None,
         "timeout_seconds": timeout_seconds.strip(),
@@ -351,6 +354,7 @@ def with_schedule(job: dict) -> dict:
     job["session_mode"] = job.get("session_mode") or "no_session"
     job["tool_mode"] = job.get("tool_mode") or "full"
     job["skills_mode"] = job.get("skills_mode") or "none"
+    job["skill_ids"] = job.get("skill_ids") or ""
     job["skill_paths"] = job.get("skill_paths") or ""
     job["run_user"] = job.get("run_user") or ""
     return job
@@ -506,6 +510,7 @@ def new_job(request: Request):
         "session_mode": "no_session",
         "tool_mode": "full",
         "skills_mode": "none",
+        "skill_ids": "",
         "skill_paths": "",
         "run_user": "",
     }
@@ -531,7 +536,7 @@ def create_job(
     session_mode: Annotated[str, Form()] = "no_session",
     tool_mode: Annotated[str, Form()] = "full",
     skills_mode: Annotated[str, Form()] = "none",
-    skill_paths: Annotated[str, Form()] = "",
+    skill_ids: Annotated[list[str] | None, Form()] = None,
     run_user: Annotated[str, Form()] = "",
     enabled: Annotated[str | None, Form()] = None,
     prevent_overlap: Annotated[str | None, Form()] = None,
@@ -552,7 +557,7 @@ def create_job(
         enabled,
         prevent_overlap,
         skills_mode,
-        skill_paths,
+        skill_ids,
     )
     errors = validate_job_form(data)
     if errors:
@@ -894,7 +899,7 @@ def update_job(
     session_mode: Annotated[str, Form()] = "no_session",
     tool_mode: Annotated[str, Form()] = "full",
     skills_mode: Annotated[str, Form()] = "none",
-    skill_paths: Annotated[str, Form()] = "",
+    skill_ids: Annotated[list[str] | None, Form()] = None,
     run_user: Annotated[str, Form()] = "",
     enabled: Annotated[str | None, Form()] = None,
     prevent_overlap: Annotated[str | None, Form()] = None,
@@ -917,7 +922,7 @@ def update_job(
         enabled,
         prevent_overlap,
         skills_mode,
-        skill_paths,
+        skill_ids,
     )
     errors = validate_job_form(data)
     if errors:

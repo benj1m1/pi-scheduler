@@ -41,7 +41,7 @@ def test_form_data_forces_overlap_prevention():
     assert data["skill_paths"] == ""
 
 
-def test_job_form_data_accepts_approved_skill_paths():
+def test_form_data_accepts_selected_approved_skill_ids():
     data = web.form_data(
         "pi-agent",
         "check logs",
@@ -58,11 +58,80 @@ def test_job_form_data_accepts_approved_skill_paths():
         "on",
         None,
         "approved",
-        "/opt/pi-scheduler/skills/safe\n/home/pi-scheduler-agent/.pi/agent/approved-skills/pdf",
+        ["pdf", "obsidian-markdown"],
     )
 
     assert data["skills_mode"] == "approved"
-    assert data["skill_paths"] == "/opt/pi-scheduler/skills/safe\n/home/pi-scheduler-agent/.pi/agent/approved-skills/pdf"
+    assert data["skill_ids"] == "pdf\nobsidian-markdown"
+    assert data["skill_paths"] == ""
+
+
+def test_validate_job_form_accepts_existing_catalog_skill_ids(tmp_path, monkeypatch):
+    root = tmp_path / "approved-skills"
+    (root / "pdf").mkdir(parents=True)
+    (root / "pdf" / "SKILL.md").write_text("---\nname: pdf\n---\n", encoding="utf-8")
+    monkeypatch.setattr(config, "APPROVED_SKILLS_DIR", root, raising=False)
+
+    data = {
+        "name": "agent",
+        "task_prompt": "check logs",
+        "cron_expr": "*/5 * * * *",
+        "schedule_error": None,
+        "output_mode": "summary",
+        "session_mode": "no_session",
+        "tool_mode": "full",
+        "skills_mode": "approved",
+        "skill_ids": "pdf",
+        "run_user": "",
+        "timeout_seconds": "240",
+    }
+
+    assert "Approved skill" not in "\n".join(web.validate_job_form(data))
+
+
+def test_validate_job_form_rejects_missing_catalog_skill_ids(tmp_path, monkeypatch):
+    root = tmp_path / "approved-skills"
+    root.mkdir()
+    monkeypatch.setattr(config, "APPROVED_SKILLS_DIR", root, raising=False)
+
+    data = {
+        "name": "agent",
+        "task_prompt": "check logs",
+        "cron_expr": "*/5 * * * *",
+        "schedule_error": None,
+        "output_mode": "summary",
+        "session_mode": "no_session",
+        "tool_mode": "full",
+        "skills_mode": "approved",
+        "skill_ids": "pdf",
+        "run_user": "",
+        "timeout_seconds": "240",
+    }
+
+    assert "Approved skill 'pdf' is not available" in web.validate_job_form(data)
+
+
+def test_database_persists_skill_ids(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "agent",
+            "skill_name": "general",
+            "task_prompt": "check logs",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+            "skills_mode": "approved",
+            "skill_ids": "pdf\nobsidian-markdown",
+        }
+    )
+
+    job = db.get_job(job_id)
+    assert job["skill_ids"] == "pdf\nobsidian-markdown"
 
 
 def test_job_form_data_includes_run_user(monkeypatch):
