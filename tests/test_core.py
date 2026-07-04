@@ -689,6 +689,19 @@ def test_render_cron_file_adds_discovered_pi_node_bin_to_path(tmp_path, monkeypa
     assert path_line.index(str(pi_bin)) < path_line.index("/usr/local/bin")
 
 
+def test_setup_runtime_user_script_syntax_and_defaults():
+    script = Path("/opt/pi-scheduler/deploy/setup-runtime-user.sh")
+    assert script.exists()
+    content = script.read_text(encoding="utf-8")
+    assert 'RUNTIME_USER="pi-scheduler-agent"' in content
+    assert 'RUNTIME_GROUP="pi-scheduler"' in content
+    assert 'MODELS_FILE="/root/.pi/agent/models.json"' in content
+    assert "useradd" in content
+    assert "usermod -aG" in content
+    assert "chgrp -R" in content
+    assert "chmod -R g+rwX" in content
+
+
 def test_runtime_setup_config_defaults():
     assert config.RUNTIME_USER == "pi-scheduler-agent"
     assert config.RUNTIME_GROUP == "pi-scheduler"
