@@ -95,6 +95,81 @@ def test_job_form_data_includes_run_user(monkeypatch):
     assert web.validate_job_form(data) == []
 
 
+def test_approved_skills_catalog_lists_valid_directories(tmp_path, monkeypatch):
+    from app import approved_skills
+
+    root = tmp_path / "approved-skills"
+    (root / "pdf").mkdir(parents=True)
+    (root / "pdf" / "SKILL.md").write_text(
+        "---\nname: pdf\ndescription: Work with PDFs\n---\n\n# PDF\n",
+        encoding="utf-8",
+    )
+    (root / "obsidian-markdown").mkdir()
+    (root / "obsidian-markdown" / "SKILL.md").write_text(
+        "---\nname: obsidian-markdown\ndescription: Work with Obsidian markdown\n---\n",
+        encoding="utf-8",
+    )
+    (root / "missing-skill-md").mkdir()
+    (root / "bad id").mkdir()
+    (root / "bad id" / "SKILL.md").write_text("---\nname: bad\n---\n", encoding="utf-8")
+    (root / "file-skill").write_text("not a directory", encoding="utf-8")
+
+    monkeypatch.setattr(config, "APPROVED_SKILLS_DIR", root, raising=False)
+
+    entries = approved_skills.list_skills()
+
+    assert [entry.id for entry in entries] == ["obsidian-markdown", "pdf"]
+    assert entries[0].name == "obsidian-markdown"
+    assert entries[1].description == "Work with PDFs"
+
+
+def test_approved_skills_catalog_rejects_traversal_absolute_and_missing(tmp_path, monkeypatch):
+    from app import approved_skills
+
+    root = tmp_path / "approved-skills"
+    (root / "pdf").mkdir(parents=True)
+    (root / "pdf" / "SKILL.md").write_text("---\nname: pdf\n---\n", encoding="utf-8")
+    monkeypatch.setattr(config, "APPROVED_SKILLS_DIR", root, raising=False)
+
+    assert approved_skills.resolve_skill_path("pdf") == (root / "pdf").resolve()
+
+    for value in ["../pdf", "/tmp/pdf", "bad id", ".hidden", "missing"]:
+        try:
+            approved_skills.resolve_skill_path(value)
+        except approved_skills.SkillCatalogError as exc:
+            assert str(exc)
+        else:
+            raise AssertionError(f"expected {value!r} to be rejected")
+
+
+def test_approved_skills_catalog_rejects_symlink_entries(tmp_path, monkeypatch):
+    from app import approved_skills
+
+    root = tmp_path / "approved-skills"
+    external = tmp_path / "external"
+    external.mkdir(parents=True)
+    (external / "SKILL.md").write_text("---\nname: external\n---\n", encoding="utf-8")
+    root.mkdir()
+    (root / "external").symlink_to(external, target_is_directory=True)
+    monkeypatch.setattr(config, "APPROVED_SKILLS_DIR", root, raising=False)
+
+    assert approved_skills.list_skills() == []
+    try:
+        approved_skills.resolve_skill_path("external")
+    except approved_skills.SkillCatalogError as exc:
+        assert "not an approved skill" in str(exc)
+    else:
+        raise AssertionError("expected symlinked skill to be rejected")
+
+
+def test_parse_skill_ids_normalizes_repeated_and_newline_values():
+    from app import approved_skills
+
+    assert approved_skills.parse_skill_ids(None) == []
+    assert approved_skills.parse_skill_ids("pdf\nobsidian-markdown\n") == ["pdf", "obsidian-markdown"]
+    assert approved_skills.parse_skill_ids(["pdf", "", "obsidian-markdown"]) == ["pdf", "obsidian-markdown"]
+
+
 def test_group_form_data_includes_run_user(monkeypatch):
     from app import run_users
 
