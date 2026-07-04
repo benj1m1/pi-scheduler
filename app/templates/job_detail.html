@@ -1,6 +1,9 @@
 {% extends "base.html" %}
 {% block title %}{{ job.name }} - Pi Scheduler{% endblock %}
 {% block content %}
+{% macro option_risk(level) -%}
+<span class="option-risk option-risk-{{ level }}">{{ risk_labels[level] }}</span>
+{%- endmacro %}
 <section class="panel page-panel">
   <div class="card-head">
     <div>
@@ -19,15 +22,15 @@
         {% if prompt_collapsible %}<button class="inline-toggle collapsible-toggle" type="button" aria-expanded="false" aria-controls="prompt-preview">Show more</button>{% endif %}
       </div>
     </dd>
-    <dt>Model</dt><dd>{{ job.provider_name ~ '/' ~ job.model_id if job.provider_name and job.model_id else 'Pi default' }}</dd>
-    <dt>Output</dt><dd>{{ 'Detailed event log' if job.output_mode == 'events' else 'Summary only' }}</dd>
-    <dt>Pi session</dt><dd>{{ 'saved' if job.session_mode == 'save' else 'not saved' }}</dd>
-    <dt>Tool access</dt><dd>{{ 'Read-only tools' if job.tool_mode == 'read_only' else 'No tools' if job.tool_mode == 'no_tools' else 'Full tools' }}</dd>
-    <dt>Skills</dt><dd>{{ job|describe_job_skills }}</dd>
-    <dt>Schedule</dt><dd>{{ job.cron_expr|describe_cron }}</dd>
-    <dt>Work window</dt><dd>{{ job.work_start|describe_work_window(job.work_end) }}</dd>
-    <dt>Run as</dt><dd>{{ job.run_user|describe_run_user }}</dd>
-    <dt>Cron</dt><dd><code>{{ job.cron_expr }}</code></dd>
+    <dt>Model</dt><dd>{{ job.provider_name ~ '/' ~ job.model_id if job.provider_name and job.model_id else 'Pi default' }} {{ option_risk(risk_levels.model) }}</dd>
+    <dt>Output</dt><dd>{{ 'Detailed event log' if job.output_mode == 'events' else 'Summary only' }} {{ option_risk(risk_levels.output) }}</dd>
+    <dt>Pi session</dt><dd>{{ 'Save Pi session' if job.session_mode == 'save' else 'Do not save Pi session' }} {{ option_risk(risk_levels.session) }}</dd>
+    <dt>Tool access</dt><dd>{{ 'Read-only tools' if job.tool_mode == 'read_only' else 'No tools' if job.tool_mode == 'no_tools' else 'Full tools' }} {{ option_risk(risk_levels.tools) }}</dd>
+    <dt>Skills</dt><dd>{{ job|describe_job_skills }} {{ option_risk(risk_levels.skills) }}</dd>
+    <dt>Schedule</dt><dd>{{ job.cron_expr|describe_cron }} {{ option_risk(risk_levels.schedule) }}</dd>
+    <dt>Work window</dt><dd>{{ job.work_start|describe_work_window(job.work_end) }} {{ option_risk(risk_levels.work_window) }}</dd>
+    <dt>Run as</dt><dd>{{ job.run_user|describe_run_user }} {{ option_risk(risk_levels.run_user) }}</dd>
+    <dt>Cron</dt><dd><code>{{ job.cron_expr }}</code> {{ option_risk(risk_levels.cron) }}</dd>
     <dt>Command</dt>
     <dd>
       <div class="collapsible-field" {% if command_collapsible %}data-collapsible{% endif %}>
@@ -36,8 +39,8 @@
       </div>
     </dd>
     {% if command_error %}<dt>Command error</dt><dd><span class="bad-text">{{ command_error }}</span></dd>{% endif %}
-    <dt>Timeout</dt><dd>{{ job.timeout_seconds }} seconds</dd>
-    <dt>Overlap</dt><dd>{{ 'prevented' if job.prevent_overlap else 'allowed' }}</dd>
+    <dt>Timeout</dt><dd>{{ job.timeout_seconds }} seconds {{ option_risk(risk_levels.timeout) }}</dd>
+    <dt>Overlap</dt><dd>{{ 'prevented' if job.prevent_overlap else 'allowed' }} {{ option_risk(risk_levels.overlap) }}</dd>
   </dl>
   <section class="risk-profile" aria-labelledby="risk-profile-title">
     <div class="section-head risk-profile-head">

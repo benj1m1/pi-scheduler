@@ -112,6 +112,29 @@ def describe_job_tools(job: dict) -> str:
     return "Full tools"
 
 
+RISK_LABELS = {
+    "success": "Low risk",
+    "warning": "Medium risk",
+    "danger": "High risk",
+}
+
+
+def job_risk_levels(job: dict) -> dict[str, str]:
+    return {
+        "model": "warning",
+        "output": "success",
+        "session": "danger" if job.get("session_mode") == "save" else "success",
+        "tools": "danger" if (job.get("tool_mode") or "full") == "full" else "warning",
+        "skills": "danger" if job.get("skills_mode") == "runtime" else "warning" if job.get("skills_mode") == "approved" else "success",
+        "schedule": "success",
+        "work_window": "success",
+        "run_user": "danger" if run_users.effective_run_user(job.get("run_user")) == "root" else "warning",
+        "cron": "success",
+        "timeout": "success",
+        "overlap": "success",
+    }
+
+
 def job_risk_groups(job: dict) -> list[dict]:
     low_items = [
         {"label": "Schedule", "value": cron.describe_cron(job.get("cron_expr", ""))},
@@ -884,6 +907,8 @@ def job_detail(
             "command_error": command_error,
             "has_running_run": bool(queued) or status_data["has_running_run"],
             "risk_groups": job_risk_groups(job),
+            "risk_levels": job_risk_levels(job),
+            "risk_labels": RISK_LABELS,
         },
     )
 
