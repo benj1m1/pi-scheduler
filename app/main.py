@@ -89,6 +89,76 @@ def describe_job_skills(job: dict) -> str:
     return "Approved: " + ", ".join(ids)
 
 
+def describe_job_model(job: dict) -> str:
+    if job.get("provider_name") and job.get("model_id"):
+        return f"{job['provider_name']}/{job['model_id']}"
+    return "Pi default"
+
+
+def describe_job_output(job: dict) -> str:
+    return "Detailed event log" if job.get("output_mode") == "events" else "Summary only"
+
+
+def describe_job_session(job: dict) -> str:
+    return "Save Pi session" if job.get("session_mode") == "save" else "Do not save Pi session"
+
+
+def describe_job_tools(job: dict) -> str:
+    tool_mode = job.get("tool_mode") or "full"
+    if tool_mode == "read_only":
+        return "Read-only tools"
+    if tool_mode == "no_tools":
+        return "No tools"
+    return "Full tools"
+
+
+def job_risk_groups(job: dict) -> list[dict]:
+    low_items = [
+        {"label": "Schedule", "value": cron.describe_cron(job.get("cron_expr", ""))},
+        {"label": "Output", "value": describe_job_output(job)},
+        {"label": "Work window", "value": work_window.describe(job.get("work_start"), job.get("work_end"))},
+        {"label": "Timeout", "value": f"{job.get('timeout_seconds')} seconds"},
+        {"label": "Overlap", "value": "prevented" if job.get("prevent_overlap") else "allowed"},
+        {"label": "Enabled", "value": "enabled" if job.get("enabled") else "disabled"},
+    ]
+    medium_items = [
+        {"label": "Model", "value": describe_job_model(job)},
+    ]
+    high_items = []
+
+    run_user = run_users.effective_run_user(job.get("run_user"))
+    if run_user == "root":
+        high_items.append({"label": "Run user", "value": "Runs as root"})
+    else:
+        medium_items.append({"label": "Run user", "value": run_users.describe_run_user(job.get("run_user"))})
+
+    tool_description = describe_job_tools(job)
+    if (job.get("tool_mode") or "full") == "full":
+        high_items.append({"label": "Tool access", "value": tool_description})
+    else:
+        medium_items.append({"label": "Tool access", "value": tool_description})
+
+    session_description = describe_job_session(job)
+    if job.get("session_mode") == "save":
+        high_items.append({"label": "Pi session", "value": session_description})
+    else:
+        low_items.append({"label": "Pi session", "value": session_description})
+
+    skills_description = describe_job_skills(job)
+    if job.get("skills_mode") == "runtime":
+        high_items.append({"label": "Skills", "value": skills_description})
+    elif job.get("skills_mode") == "approved":
+        medium_items.append({"label": "Skills", "value": skills_description})
+    else:
+        low_items.append({"label": "Skills", "value": skills_description})
+
+    return [
+        {"level": "success", "title": "Low risk", "items": low_items},
+        {"level": "warning", "title": "Medium risk", "items": medium_items},
+        {"level": "danger", "title": "High risk", "items": high_items},
+    ]
+
+
 def run_status_class(status_value: str) -> str:
     if status_value == "success":
         return "ok"
@@ -813,6 +883,7 @@ def job_detail(
             "command": command,
             "command_error": command_error,
             "has_running_run": bool(queued) or status_data["has_running_run"],
+            "risk_groups": job_risk_groups(job),
         },
     )
 
