@@ -54,35 +54,44 @@
   </div>
   <div class="cards">
     {% for group in groups %}
-    <article class="card group-card">
-      <div class="card-head">
-        <h2><a href="/groups/{{ group.id }}">{{ group.name }}</a></h2>
-        <span class="badge {{ 'ok' if group.enabled else 'muted' }}">{{ 'enabled' if group.enabled else 'disabled' }}</span>
+    <article class="card group-card dashboard-card">
+      <div class="card-head dashboard-card-head">
+        <div>
+          <h2><a href="/groups/{{ group.id }}">{{ group.name }}</a></h2>
+          <div class="context-chips" aria-label="Governance context for {{ group.name }}">
+            <span>owner: {{ group.owner or 'not documented' }}</span>
+            <span>{{ group.environment }}</span>
+            <span>{{ group.risk_level }} risk</span>
+            <span>run as: {{ group.run_user|describe_run_user }}</span>
+          </div>
+        </div>
+        <span class="badge {{ 'bad' if group.is_expired else 'ok' if group.enabled else 'muted' }}">{{ 'expired' if group.is_expired else 'enabled' if group.enabled else 'disabled' }}</span>
       </div>
-      <ol class="group-chain" aria-label="Members in {{ group.name }}">
+
+      <ol class="group-chain compact-chain" aria-label="Members in {{ group.name }}">
         {% for member in group.members %}
         <li><a href="/jobs/{{ member.job_id }}">{{ member.job_name }}</a></li>
         {% endfor %}
       </ol>
-      <dl class="job-card-meta">
-        <dt>Schedule</dt><dd>{{ group.cron_expr|describe_cron }}</dd>
-        <dt>Work</dt><dd>{{ group.work_start|describe_work_window(group.work_end) }}</dd>
-        <dt>Run as</dt><dd>{{ group.run_user|describe_run_user }}</dd>
-        <dt>Owner</dt><dd>{{ group.owner or 'Not documented' }}</dd>
-        <dt>Environment</dt><dd>{{ group.environment }}</dd>
-        <dt>Risk</dt><dd>{{ group.risk_level }}</dd>
-        <dt>Expires</dt><dd>{{ group.expires_at or 'Never' }}{% if group.is_expired %} <span class="badge bad">expired</span>{% endif %}</dd>
-        <dt>Next check</dt><dd>{{ group.next_run|beijing_time or 'not scheduled' }}</dd>
-        <dt>Last</dt>
-        <dd>
+
+      <div class="status-tile-grid" aria-label="Schedule and run status for {{ group.name }}">
+        <div class="status-tile"><span>Schedule</span><strong>{{ group.cron_expr|describe_cron }}</strong></div>
+        <div class="status-tile"><span>Next check</span><strong>{{ group.next_run|beijing_time or 'not scheduled' }}</strong></div>
+        <div class="status-tile status-tile-wide"><span>Last run</span><strong>
           {% if group.last_status %}
           <a href="{{ group.last_group_run_id|group_run_path(group.id) }}"><span class="badge {{ 'ok' if group.last_status == 'success' else 'bad' if group.last_status in ['failed', 'timeout'] else 'muted' }}">{{ group.last_status }}</span></a>
           {{ group.last_duration_ms|seconds_duration }} s · {{ group.last_finished_at|beijing_time or group.last_started_at|beijing_time }}
           {% else %}
           never run
           {% endif %}
-        </dd>
+        </strong></div>
+      </div>
+
+      <dl class="compact-meta">
+        <dt>Work window</dt><dd>{{ group.work_start|describe_work_window(group.work_end) }}</dd>
+        <dt>Expires</dt><dd>{{ group.expires_at or 'Never' }}</dd>
       </dl>
+
       <div class="actions">
         <a class="button" href="/groups/{{ group.id }}">Details</a>
         <form method="post" action="/groups/{{ group.id }}/toggle">
@@ -112,25 +121,42 @@
   </div>
 <div class="cards">
   {% for job in jobs %}
-  <article class="card job-card">
-    <div class="card-head">
-      <h2><a href="/jobs/{{ job.id }}">{{ job.name }}</a></h2>
-      <span class="badge {{ 'ok' if job.enabled else 'muted' }}">{{ 'enabled' if job.enabled else 'disabled' }}</span>
+  <article class="card job-card dashboard-card">
+    <div class="card-head dashboard-card-head">
+      <div>
+        <h2><a href="/jobs/{{ job.id }}">{{ job.name }}</a></h2>
+        <div class="context-chips" aria-label="Governance context for {{ job.name }}">
+          <span>owner: {{ job.owner or 'not documented' }}</span>
+          <span>{{ job.environment }}</span>
+          <span>{{ job.risk_level }} risk</span>
+          <span>run as: {{ job.run_user|describe_run_user }}</span>
+        </div>
+      </div>
+      <span class="badge {{ 'bad' if job.is_expired else 'ok' if job.enabled else 'muted' }}">{{ 'expired' if job.is_expired else 'enabled' if job.enabled else 'disabled' }}</span>
     </div>
-    <dl class="job-card-meta">
-      <dt>Prompt</dt><dd class="prompt-preview">{{ job.task_prompt|truncate(220, true) }}</dd>
+
+    <div class="status-tile-grid" aria-label="Schedule and run status for {{ job.name }}">
+      <div class="status-tile"><span>Schedule</span><strong>{{ job.cron_expr|describe_cron }}</strong></div>
+      <div class="status-tile"><span>Next check</span><strong>{{ job.next_run|beijing_time or 'not scheduled' }}</strong></div>
+      <div class="status-tile status-tile-wide"><span>Last run</span><strong>
+        {% if job.last_status %}
+        <span class="badge {{ 'ok' if job.last_status == 'success' else 'bad' if job.last_status in ['failed', 'timeout'] else 'muted' }}">{{ job.last_status }}</span>
+        {{ job.last_finished_at|beijing_time }}
+        {% else %}
+        never run
+        {% endif %}
+      </strong></div>
+    </div>
+
+    <p class="prompt-snippet">{{ job.task_prompt|truncate(180, true) }}</p>
+
+    <dl class="compact-meta">
       <dt>Model</dt><dd>{{ job.provider_name ~ '/' ~ job.model_id if job.provider_name and job.model_id else 'Pi default' }}</dd>
-      <dt>Schedule</dt><dd>{{ job.cron_expr|describe_cron }}</dd>
-      <dt>Work</dt><dd>{{ job.work_start|describe_work_window(job.work_end) }}</dd>
       <dt>Skills</dt><dd>{{ job|describe_job_skills }}</dd>
-      <dt>Run as</dt><dd>{{ job.run_user|describe_run_user }}</dd>
-      <dt>Owner</dt><dd>{{ job.owner or 'Not documented' }}</dd>
-      <dt>Environment</dt><dd>{{ job.environment }}</dd>
-      <dt>Risk</dt><dd>{{ job.risk_level }}</dd>
-      <dt>Expires</dt><dd>{{ job.expires_at or 'Never' }}{% if job.is_expired %} <span class="badge bad">expired</span>{% endif %}</dd>
-      <dt>Next check</dt><dd>{{ job.next_run|beijing_time or 'not scheduled' }}</dd>
-      <dt>Last</dt><dd>{{ job.last_status or 'never run' }} {{ job.last_finished_at|beijing_time }}</dd>
+      <dt>Work window</dt><dd>{{ job.work_start|describe_work_window(job.work_end) }}</dd>
+      <dt>Expires</dt><dd>{{ job.expires_at or 'Never' }}</dd>
     </dl>
+
     <div class="actions">
       <a class="button" href="/jobs/{{ job.id }}">Details</a>
       <form method="post" action="/jobs/{{ job.id }}/toggle">

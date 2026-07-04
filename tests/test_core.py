@@ -1930,6 +1930,54 @@ def test_index_renders_for_authenticated_user(tmp_path, monkeypatch):
     assert response.status_code == 200
 
 
+def test_index_uses_compact_status_cards(tmp_path, monkeypatch):
+    monkeypatch.setattr(web.config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(web.config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(web.config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(web.config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+
+    db.init_db()
+    job_id = db.create_job(
+        {
+            "name": "daily agent",
+            "skill_name": "general",
+            "task_prompt": "check logs and summarize issues",
+            "cron_expr": "*/5 * * * *",
+            "enabled": 1,
+            "timeout_seconds": 240,
+            "prevent_overlap": 1,
+            "owner": "ops",
+            "environment": "production",
+            "risk_level": "medium",
+        }
+    )
+    db.insert_run(
+        {
+            "id": "latest-run",
+            "job_id": job_id,
+            "source": "cron",
+            "started_at": "2026-06-27T14:55:01Z",
+            "finished_at": "2026-06-27T14:56:01Z",
+            "status": "success",
+            "duration_ms": 60000,
+            "exit_code": 0,
+            "command": "pi -p run",
+        }
+    )
+    request = Request({"type": "http", "method": "GET", "path": "/", "headers": []})
+    response = web.index(request)
+    html = web.templates.env.get_template("index.html").render(response.context)
+
+    assert "status-tile-grid" in html
+    assert "context-chips" in html
+    assert "prompt-snippet" in html
+    assert "Last run" in html
+    assert "Next check" in html
+    assert "owner: ops" in html
+    assert "production" in html
+    assert "medium risk" in html
+
+
 def test_toggle_buttons_use_stateful_action_styles(tmp_path, monkeypatch):
     monkeypatch.setattr(web.config, "DATA_DIR", tmp_path / "data")
     monkeypatch.setattr(web.config, "LOG_DIR", tmp_path / "logs")
