@@ -1,38 +1,24 @@
 # Pi Scheduler
 
-Scheduling and execution platform for Pi CLI agents — define jobs and job groups with interval schedules, model selection, work windows, and run them via system cron with full logging, retention, and a web dashboard.
+A small FastAPI scheduler for Pi CLI agents. Define jobs and job groups, run them through system cron, execute them under controlled Linux users, and review logs, governance metadata, and audit history from a web UI.
+
+## What it does
+
+- **Schedules Pi CLI jobs** via a managed cron file, defaulting to `/etc/cron.d/pi-agent-jobs`.
+- **Runs jobs and groups safely** with file locks, timeouts, work windows, per-job/per-group run users, and an allowlist for non-default users.
+- **Defaults to no skills** (`pi --no-skills`) and supports an approved skills catalog by skill ID.
+- **Supports governance controls**: global pause, owner/purpose/scope/environment/risk/expiration metadata, and audit logging.
+- **Provides operational UI**: compact dashboard, progressive job/group forms, log viewer, audit activity feed, and read-only cron status.
 
 ## Architecture
 
-```
-┌──────────────────────────────────────────────────────┐
-│ FastAPI web UI (uvicorn)    │  /etc/cron.d/pi-       │
-│                             │  agent-jobs             │
-│ ┌─────────┐  ┌───────────┐  │                        │
-│ │ jobs    │  │ groups    │──┼── invokes ────────────┐│
-│ │ CRUD    │  │ CRUD      │  │  bin/pi-job-runner    ││
-│ └────┬────┘  └─────┬─────┘  │   --job-id <id>       ││
-│      │             │         │   --group-id <id>     ││
-│      ▼             ▼         │                       ││
-│ ┌─────────────────────────┐  │          │            ││
-│ │   app/runner.py         │◄─┼──────────┘            ││
-│ │   execute_job()         │  │                       ││
-│ │   run_group()           │  │  ┌─────────────────┐  ││
-│ └───────────┬─────────────┘  │  │ pi CLI binary   │  ││
-│             │                │  │ + models.json   │  ││
-│      ┌──────┴──────┐        │  └─────────────────┘  ││
-│      ▼             ▼        │                        ││
-│  SQLite DB    logs/jobs/    │                        ││
-│  data/        locks/        │                        ││
-└──────────────────────────────────────────────────────┘
-```
+- **Web UI**: FastAPI + Jinja2 + Basic Auth, no frontend build step.
+- **Runner**: `bin/pi-job-runner`, invoked by cron or manual Run Now.
+- **Storage**: SQLite at `data/pi-scheduler.sqlite3`.
+- **Logs**: structured run files under `logs/jobs/<job-id>/runs/`.
+- **Cron**: regenerated after mutations and on startup.
 
-- **Web panel** — FastAPI + Jinja2 + Basic Auth, single CSS file, no build step.
-- **Runner** — Standalone Python CLI invoked by cron; acquires file locks, runs `pi`, writes logs.
-- **Storage** — SQLite (`data/pi-scheduler.sqlite3`), structured log files under `logs/jobs/<job-id>/runs/`.
-- **Scheduling** — App regenerates `/etc/cron.d/pi-agent-jobs` on every mutation (create/edit/toggle/delete/startup).
-
-## Quick Start (Local Development)
+## Quick start
 
 ```bash
 python3 -m venv .venv
@@ -43,25 +29,11 @@ export PI_SCHEDULER_PASSWORD='set-a-real-password'
 deploy/run-local.sh
 ```
 
-Open `http://127.0.0.1:8080`, log in with `admin` / your password.  
-Default password is `pi-scheduler` if the env var is not set — change it before network exposure.
+Open `http://127.0.0.1:8080` and log in with `admin` / your password.
 
-`deploy/run-local.sh` prepares the dedicated runtime user `pi-scheduler-agent`, grants scheduler runtime directory permissions, copies `/root/.pi/agent/models.json` when available, sets local run-user defaults, and writes cron output to `/etc/cron.d/pi-agent-jobs` so scheduled jobs run automatically. If started as a non-root user, it restarts itself with `sudo -E` because the web process must be able to update `/etc/cron.d/pi-agent-jobs` whenever jobs or groups change.
+`deploy/run-local.sh` prepares the `pi-scheduler-agent` runtime user, grants runtime directory permissions, copies `/root/.pi/agent/models.json` when available, and writes `/etc/cron.d/pi-agent-jobs` so automatic jobs run locally. It restarts with `sudo -E` when needed because updating `/etc/cron.d` requires privileges.
 
 ## Install on Ubuntu
-
-These steps also work inside an LXC container.
-
-Before installing Pi Scheduler, verify the Pi CLI works from cron's minimal `PATH`:
-
-```bash
-command -v pi
-command -v node
-pi --version
-env -i PATH=/usr/local/bin:/usr/bin:/bin pi --version
-```
-
-If the final check hangs or fails, fix the Pi CLI installation first.
 
 ```bash
 sudo apt update
@@ -73,39 +45,37 @@ sudo .venv/bin/pip install -r requirements.txt
 sudo chmod +x /opt/pi-scheduler/bin/pi-job-runner
 sudo deploy/setup-runtime-user.sh
 sudo cp deploy/pi-scheduler-web.service /etc/systemd/system/pi-scheduler-web.service
-```
-
-Edit the service file to set a real `PI_SCHEDULER_PASSWORD` and adjust `--host` if needed, then:
-
-```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now pi-scheduler-web.service
 ```
 
-Ensure the system cron daemon is running:
+Before relying on cron, verify the Pi CLI works in cron's minimal environment:
 
 ```bash
+env -i PATH=/usr/local/bin:/usr/bin:/bin pi --version
 sudo systemctl status cron --no-pager
 ```
 
-## Web UI Workflow
+Edit `/etc/systemd/system/pi-scheduler-web.service` to set a real `PI_SCHEDULER_PASSWORD` before exposing the service.
 
-The dashboard is designed for quick operational checks:
+## Web UI
 
-- The header shows the scheduler state (`active` or `paused`). Open the compact **Scheduler** control to pause or resume all automatic and manual execution.
-- The homepage lists jobs and groups as compact cards with owner, environment, risk, run user, schedule, next check, and latest run status.
-- Job and group forms use progressive disclosure: basic setup, schedule, and governance fields are visible first; advanced execution settings are collapsed until needed.
-- `/logs` is the run-history workspace for filtering, viewing transcripts, and cleaning old run records.
-- `/audit` is a governance activity feed for administrative changes, manual run requests, and pause/resume events.
-- `/cron` is a read-only activation check that compares generated cron content with the managed cron file and cron service status.
+- **Dashboard `/`**: compact job/group cards with owner, environment, risk, run user, schedule, next check, and latest status.
+- **Header Scheduler control**: compact global pause/resume entry point.
+- **Job/group forms**: basic setup, schedule, and governance first; advanced execution settings are collapsed.
+- **Logs `/logs`**: filter runs, view stdout/stderr/JSONL, and clean old runs.
+- **Audit `/audit`**: governance activity feed for admin changes, manual run requests, and pause/resume events.
+- **Cron `/cron`**: read-only preview and activation status for the managed cron file.
 
-## Jobs
+## Jobs and groups
 
-Each job represents one Pi agent invocation with a prompt, schedule, and execution configuration. The form keeps the common path short: name, prompt, schedule, and governance metadata are shown first, while model/tool/skills/run-user settings are under **Advanced execution settings**.
+A **job** is one Pi CLI invocation with a prompt, model selection, schedule, work window, run user, skills policy, timeout, and governance metadata.
 
-### Scheduling
+A **group** runs existing jobs sequentially as a pipeline. Group schedule, work window, run user, and failure policy control the whole chain. Member job enabled state and member work windows are ignored during group execution, but member overlap locks still apply.
 
-Jobs use simple interval controls — no raw cron syntax in the form:
+### Scheduling and work windows
+
+Jobs and groups use interval controls instead of raw cron syntax:
 
 | Form input | Cron expression |
 |---|---|
@@ -114,45 +84,35 @@ Jobs use simple interval controls — no raw cron syntax in the form:
 | Every 1 hour | `0 * * * *` |
 | Every 2 hours | `0 */2 * * *` |
 
-The job detail page shows the generated cron expression for verification.
+Work windows use Beijing time. Cron runs outside the window exit before invoking Pi. Manual Run Now bypasses schedule and work-window checks, but not pause/expiration/run-user validation.
 
-### Model Selection
+### Execution defaults
 
-The job form lists provider/model options from `~/.pi/agent/models.json` (read-only). The runner validates the selected pair before each run — if the config has changed or is invalid, the run is recorded as failed without invoking `pi`.
+New jobs default to:
 
-Command shape when a model is selected:
+- Summary output (`pi -p`)
+- No saved Pi session (`--no-session`)
+- Full tools
+- No skills (`--no-skills`)
+- Overlap prevention enabled
+
+When a provider/model is selected, the runner validates it against `~/.pi/agent/models.json` before invoking Pi.
+
+### Run users
+
+Jobs and groups can specify a Linux user. Blank means `PI_SCHEDULER_CRON_USER`; local deploy defaults this to `pi-scheduler-agent`.
+
+Non-default users must be allowlisted:
 
 ```bash
-pi --no-session --name 'pi-scheduler: <job name>' -p --provider <provider> --model <model> "<prompt>"
+PI_SCHEDULER_ALLOWED_RUN_USERS=root,pi-scheduler-agent
 ```
 
-When no model is selected, Pi uses its default behavior:
+Manual Run Now uses the configured run user by launching `bin/pi-job-runner --source manual`. If the web service cannot switch to the target user, the run is rejected instead of running as the wrong user.
 
-```bash
-pi --no-skills --no-session --name 'pi-scheduler: <job name>' -p "<prompt>"
-```
+### Skills policy
 
-### Run Output, Sessions & Tools
-
-| Setting | Options |
-|---|---|
-| Output mode | **Summary only** — `pi -p`, stores stdout as transcript |
-| | **Detailed event log** — `pi --mode json`, stores raw JSONL + rendered transcript |
-| Session | **Do not save** — appends `--no-session` |
-| | **Save** — sessions named `pi-scheduler: <job name>` |
-| Tool access | **Full tools** — Pi defaults |
-| | **Read-only** — `--tools read,grep,find,ls` (no `bash`) |
-| | **No tools** — `--no-tools` |
-| Skills policy | **No skills** — appends `--no-skills` |
-| | **Approved skills** — appends `--no-skills --skill <catalog path>` for each selected catalog skill |
-| | **Runtime user default skills** — lets Pi discover skills from the runtime user's normal Pi environment |
-
-Defaults for new jobs: Summary only, Do not save session, Full tools, No skills.  
-Legacy databases migrate existing jobs to safe skills behavior (`No skills`) while preserving older output/session/tool defaults.
-
-### Approved Skills Catalog
-
-Jobs run with `--no-skills` by default. To allow a job to use skills, install reviewed skills under the scheduler-managed catalog:
+Jobs run with `--no-skills` by default. To enable reviewed skills, install them under the approved catalog:
 
 ```bash
 sudo install -d -o root -g pi-scheduler -m 0750 /opt/pi-scheduler/approved-skills
@@ -161,215 +121,112 @@ sudo chown -R root:pi-scheduler /opt/pi-scheduler/approved-skills
 sudo chmod -R u=rwX,g=rX,o= /opt/pi-scheduler/approved-skills
 ```
 
-Each catalog entry must be a direct child directory with `SKILL.md`:
+Each catalog entry is a direct child directory with `SKILL.md`, for example:
 
 ```text
 /opt/pi-scheduler/approved-skills/pdf/SKILL.md
 ```
 
-The job form lists catalog skills as checkboxes. Jobs store skill IDs, not arbitrary paths. At runtime the scheduler invokes:
+Jobs store skill IDs, not arbitrary paths. Missing approved skills fail safely at runtime.
 
-```bash
-pi --no-skills --skill /opt/pi-scheduler/approved-skills/pdf ...
-```
+## Governance
 
-Use `Runtime user default skills` only for advanced cases where you intentionally want Pi to discover whatever skills are available to the runtime user.
+- **Global pause** blocks cron rendering/execution, manual Run Now, and direct/stale runner invocation.
+- **Metadata** on jobs and groups: owner, purpose, scope, environment, risk level, and expiration date.
+- **Expiration** uses `YYYY-MM-DD` Beijing-date semantics. Expired jobs/groups are blocked but not disabled.
+- **Audit log** records admin changes, manual run requests, and pause/resume events with expandable before/after details.
 
-### Work Windows
+## Logs and retention
 
-Work windows use Beijing time (HH:MM). Leave both start and end as `All day` for no limit. Overnight windows are supported (e.g., `22:00 – 06:00`).
-
-- Cron runs outside the work window exit without invoking `pi` and without creating a run record.
-- Manual "Run Now" bypasses both the enabled toggle and the work window check.
-
-### Run Users
-
-Jobs and groups can optionally specify a Linux user to run as. Leave the field blank to use `PI_SCHEDULER_CRON_USER`.
-
-Standalone jobs use their own run user. Groups use the group run user for the whole pipeline; member job run users are ignored during group execution.
-
-For safety, non-default users must be allowlisted:
-
-```bash
-PI_SCHEDULER_ALLOWED_RUN_USERS=root,pi-scheduler-agent
-```
-
-For local deploy, the recommended setup command is:
-
-```bash
-sudo deploy/setup-runtime-user.sh
-```
-
-It creates `pi-scheduler-agent`, creates/reuses the `pi-scheduler` group, grants scheduler runtime directory permissions, and copies `/root/.pi/agent/models.json` to `/home/pi-scheduler-agent/.pi/agent/models.json` when the source exists.
-
-The run user needs Pi CLI credentials and model configuration under its own home directory, for example `/home/pi-scheduler-agent/.pi/agent/`.
-
-Manual Run Now uses the configured run user by launching `bin/pi-job-runner --source manual`. If the web service runs as root, it switches users with `sudo -u` or `runuser`. If it cannot switch users, the manual run is rejected instead of running as the wrong user.
-
-### Agent Governance
-
-Pi Scheduler includes governance controls for scheduled Pi agents:
-
-- **Global pause** stops automatic cron execution and manual Run Now requests. The runner also checks pause state before invoking Pi, so stale cron entries and direct runner calls are blocked. The compact **Scheduler** control in the header is the primary pause/resume entry point.
-- **Governance metadata** lets jobs and groups document owner, purpose, scope, environment, risk level, and expiration date.
-- **Expiration** uses `YYYY-MM-DD` Beijing-date semantics. Expired jobs and groups are not executed by cron, manual runs, or direct runner invocation.
-- **Audit logs** record administrative changes, manual run requests, and pause/resume events. The `/audit` page presents these events as an activity feed with expandable before/after details.
-
-These controls support accountability, scoped execution, traceability, and emergency disablement.
-
-### Time Display
-
-Timestamps are stored in UTC (`2026-06-27T14:00:13Z`) and displayed as Beijing time (`2026-06-27 22:00:13 Beijing`).
-
-## Job Groups
-
-Groups execute multiple jobs sequentially as a pipeline. Each member is an existing job — groups do not define new jobs, they chain existing ones. The group form highlights the member chain, schedule, and governance metadata first; run user and failure-policy options live under **Advanced group settings**.
-
-### Key Behaviors
-
-- Members execute in the configured order (drag-to-reorder in the form).
-- Group-enabled state, schedule, and work window control whether a group starts.
-- Member job enabled state and work window are **ignored** during group execution — the pipeline runs deterministically.
-- Member job **overlap prevention** still applies: a job already running (standalone or in another group) is skipped with `skipped_overlap` status.
-- The same group cannot run concurrently (group-level lock at `locks/groups/<group-id>.lock`).
-
-### Failure Policy
-
-- **Stop on first failure** (default): the group stops after any member fails, times out, or is skipped. Remaining members are marked `skipped`.
-- **Continue after failed steps**: later members still run after a failed/timed-out/skipped step. The final group run is still marked `failed` or `timeout` if any step failed or timed out.
-
-### Group Run Visibility
-
-- Group detail page shows the member chain and recent group runs.
-- Group run detail shows each step's status with links to individual job run logs.
-- Homepage group cards show the latest group run status badge and duration.
-- Running group run detail pages auto-refresh every 5 seconds.
-
-## Run Logs
-
-Each job run writes files under `logs/jobs/<job-id>/runs/`:
+Each run writes files under `logs/jobs/<job-id>/runs/`:
 
 | File | Description |
 |---|---|
-| `<run-id>.stdout.log` | Run transcript (stdout or rendered Pi events) |
-| `<run-id>.stderr.log` | `pi` CLI stderr (often empty on success) |
-| `<run-id>.pi-events.jsonl` | Raw Pi JSONL event stream (Detailed event log only) |
+| `<run-id>.stdout.log` | Transcript or rendered Pi events |
+| `<run-id>.stderr.log` | Pi CLI stderr |
+| `<run-id>.pi-events.jsonl` | Raw Pi JSONL events for detailed mode |
 
-Daily summary JSONL files at `logs/jobs/<job-id>/<yyyy-mm-dd>.jsonl` provide quick metadata access.
+Daily summary JSONL files live under `logs/jobs/<job-id>/<yyyy-mm-dd>.jsonl`.
 
-The `/logs` page supports filtering by job, group, source, status, and date range, with pagination and cleanup controls.
+Retention is controlled by `PI_SCHEDULER_LOG_RETENTION_DAYS` (default `30`). Cleanup runs on startup and after each run; `/logs` also has manual cleanup controls.
 
-## Log Retention & Cleanup
-
-- Automatic cleanup on startup and after each run, governed by `PI_SCHEDULER_LOG_RETENTION_DAYS` (default 30).
-- Manual cleanup via the `/logs` page: delete runs older than N days, or delete all completed runs.
-
-### Cron Status
-
-The `/cron` page shows both the generated cron content and whether scheduled jobs should run automatically on the current host. Both local deploy (`deploy/run-local.sh`) and systemd deploy write `/etc/cron.d/pi-agent-jobs` by default, so the page should report `Automatic jobs are active` when the file exists, matches the generated preview, and the cron service is running.
-
-If this page reports `Automatic jobs are not active`, check the target path first. Paths outside `/etc/cron.d` are not read by system cron unless you have separately configured cron to include them.
-
-## Important Paths
-
-```
-data/pi-scheduler.sqlite3          SQLite database
-logs/jobs/<job-id>/runs/           Per-job run logs
-locks/<job-id>.lock                Per-job overlap lock (flock)
-locks/groups/<group-id>.lock       Per-group concurrency lock
-/etc/cron.d/pi-agent-jobs          Managed cron file
-```
-
-## Configuration
+## Key configuration
 
 | Variable | Default | Description |
 |---|---|---|
 | `PI_SCHEDULER_HOME` | `/opt/pi-scheduler` | Base directory |
 | `PI_SCHEDULER_DB` | `<home>/data/pi-scheduler.sqlite3` | SQLite path |
-| `PI_SCHEDULER_DATA_DIR` | `<home>/data` | Data directory |
-| `PI_SCHEDULER_LOG_DIR` | `<home>/logs` | Log directory |
-| `PI_SCHEDULER_LOCK_DIR` | `<home>/locks` | Lock directory |
 | `PI_SCHEDULER_CRON_FILE` | `/etc/cron.d/pi-agent-jobs` | Managed cron file |
-| `PI_SCHEDULER_RUNNER` | `<home>/bin/pi-job-runner` | Runner path in cron entries |
+| `PI_SCHEDULER_RUNNER` | `<home>/bin/pi-job-runner` | Runner path used in cron |
 | `PI_BINARY` | `pi` | Pi CLI binary |
 | `PI_MODELS_FILE` | `~/.pi/agent/models.json` | Read-only model config |
 | `PI_SCHEDULER_USERNAME` | `admin` | Basic Auth username |
-| `PI_SCHEDULER_PASSWORD` | `pi-scheduler` | Basic Auth password |
-| `PI_SCHEDULER_CRON_USER` | `root` | Default user in cron entries. `deploy/run-local.sh` defaults this to `pi-scheduler-agent`. |
-| `PI_SCHEDULER_ALLOWED_RUN_USERS` | `<cron user>` | Comma-separated allowlist for per-job/per-group Linux run users. Empty means only `PI_SCHEDULER_CRON_USER` is allowed. |
-| `PI_SCHEDULER_RUNTIME_USER` | `pi-scheduler-agent` | Dedicated runtime user expected by setup scripts and startup health checks |
-| `PI_SCHEDULER_RUNTIME_GROUP` | `pi-scheduler` | Runtime group granted write access to scheduler data/log/lock/tmp directories |
-| `PI_SCHEDULER_MODELS_SOURCE` | `/root/.pi/agent/models.json` | Source model config copied by `deploy/setup-runtime-user.sh` |
-| `PI_SCHEDULER_LOG_RETENTION_DAYS` | `30` | Auto-cleanup cutoff |
+| `PI_SCHEDULER_PASSWORD` | `pi-scheduler` | Basic Auth password; change this |
+| `PI_SCHEDULER_CRON_USER` | `root` | Default execution user; local deploy sets `pi-scheduler-agent` |
+| `PI_SCHEDULER_ALLOWED_RUN_USERS` | `<cron user>` | Comma-separated run-user allowlist |
+| `PI_SCHEDULER_APPROVED_SKILLS_DIR` | `/opt/pi-scheduler/approved-skills` | Approved skills catalog |
+| `PI_SCHEDULER_RUNTIME_USER` | `pi-scheduler-agent` | Runtime user expected by setup scripts |
+| `PI_SCHEDULER_RUNTIME_GROUP` | `pi-scheduler` | Runtime group for data/log/lock access |
+| `PI_SCHEDULER_LOG_RETENTION_DAYS` | `30` | Automatic log cleanup cutoff |
 
-## Database Schema
+## Important paths
 
-Eight SQLite tables with inline, idempotent migrations in `init_db()`:
-
-| Table | Purpose |
-|---|---|
-| `jobs` | Job definitions (name, prompt, cron, output/session/tool mode, timeout, work window) |
-| `runs` | Individual job execution records (status, timing, exit code, log paths, group association) |
-| `job_groups` | Group definitions (name, cron, failure policy, work window) |
-| `job_group_members` | Ordered member jobs per group |
-| `group_runs` | Group execution records |
-| `group_run_steps` | Per-step status within a group run |
-| `app_settings` | Scheduler-wide settings such as global pause state |
-| `audit_events` | Administrative audit log entries |
-
-All jobs and groups support soft delete. Schema changes are backward-compatible ALTER TABLE additions in `db.init_db()` — no standalone migration files.
-
-## Running Tests
-
-```bash
-.venv/bin/python -m pytest
+```text
+data/pi-scheduler.sqlite3          SQLite database
+logs/jobs/<job-id>/runs/           Per-job run logs
+locks/<job-id>.lock                Per-job overlap lock
+locks/groups/<group-id>.lock       Per-group concurrency lock
+/etc/cron.d/pi-agent-jobs          Managed cron file
+/opt/pi-scheduler/approved-skills  Approved skills catalog
 ```
 
-Tests use in-memory/tmp SQLite databases, monkeypatched config paths, and cover DB, cron, runner, web layer, retention, and job group workflows. No external test dependencies beyond pytest.
+## Database schema
 
-## API Routes
+SQLite tables are created/migrated idempotently in `db.init_db()`:
+
+- `jobs`
+- `runs`
+- `job_groups`
+- `job_group_members`
+- `group_runs`
+- `group_run_steps`
+- `app_settings`
+- `audit_events`
+
+Jobs and groups support soft delete. Schema changes are backward-compatible `ALTER TABLE` additions.
+
+## API routes
 
 All routes require Basic Auth.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/` | Dashboard: compact job/group cards with scheduler status in the header |
-| GET | `/jobs/new` | Create job form |
-| POST | `/jobs` | Create job |
-| GET | `/jobs/{id}` | Job detail with run history (live-polling) |
-| GET | `/jobs/{id}/edit` | Edit job form |
-| POST | `/jobs/{id}` | Update job |
-| POST | `/jobs/{id}/toggle` | Enable/disable job |
-| POST | `/jobs/{id}/delete` | Soft-delete (blocked if referenced by a group) |
-| POST | `/jobs/{id}/run` | Background: manual run |
-| GET | `/groups/new` | Create group form |
-| POST | `/groups` | Create group |
-| GET | `/groups/{id}` | Group detail + run history |
-| GET | `/groups/{id}/edit` | Edit group form |
-| POST | `/groups/{id}` | Update group |
-| POST | `/groups/{id}/toggle` | Enable/disable group |
-| POST | `/groups/{id}/delete` | Soft-delete group |
-| POST | `/groups/{id}/run` | Background: manual group run |
-| GET | `/groups/{gid}/runs/{rid}` | Group run step detail (auto-refresh if running) |
-| GET | `/group-runs/{rid}` | Convenience redirect |
-| GET | `/runs/{rid}` | Single run detail (stdout, stderr, JSONL) |
-| GET | `/logs` | Filterable/paginated log viewer |
-| POST | `/logs/cleanup` | Manual log cleanup |
-| GET | `/audit` | Filterable governance activity feed |
-| POST | `/governance/pause` | Pause all scheduled and manual execution |
-| POST | `/governance/resume` | Resume scheduled and manual execution |
-| GET | `/cron` | Read-only cron file preview |
-| GET | `/maintenance/logs` | Legacy redirect → `/logs` |
+| GET | `/` | Dashboard |
+| GET/POST | `/jobs/new`, `/jobs`, `/jobs/{id}`, `/jobs/{id}/edit` | Job create/update/detail |
+| POST | `/jobs/{id}/toggle`, `/jobs/{id}/delete`, `/jobs/{id}/run` | Job actions |
+| GET/POST | `/groups/new`, `/groups`, `/groups/{id}`, `/groups/{id}/edit` | Group create/update/detail |
+| POST | `/groups/{id}/toggle`, `/groups/{id}/delete`, `/groups/{id}/run` | Group actions |
+| GET | `/groups/{gid}/runs/{rid}`, `/group-runs/{rid}` | Group run details |
+| GET | `/runs/{rid}` | Single run detail |
+| GET/POST | `/logs`, `/logs/cleanup` | Logs and cleanup |
+| GET | `/audit` | Audit activity feed |
+| POST | `/governance/pause`, `/governance/resume` | Global pause controls |
+| GET | `/cron` | Read-only cron preview/status |
+
+## Development
+
+```bash
+.venv/bin/python -m pytest
+.venv/bin/python -m compileall app bin
+bash -n deploy/run-local.sh
+bash -n deploy/setup-runtime-user.sh
+```
+
+Tests use temporary SQLite databases and monkeypatched paths. No external services are required.
 
 ## Notes
 
-- The web app only manages `/etc/cron.d/pi-agent-jobs`. It does not touch user crontabs or other system cron files.
-- If scheduled runs don't appear, verify the cron file exists and `cron.service` is active.
-- Pi Scheduler, the Pi CLI, and `~/.pi/agent/models.json` should belong to the same runtime user. Skills are disabled by default for scheduled jobs; only use runtime-user skills or approved skill paths when a job explicitly needs them.
-- Job overlap prevention is always enforced (`prevent_overlap` forced to 1).
-
-## Dependencies
-
-- Python ≥ 3.10
-- FastAPI ≥ 0.111, Uvicorn ≥ 0.30, Jinja2 ≥ 3.1
-- python-multipart ≥ 0.0.9, croniter ≥ 2.0
+- The web app only manages `/etc/cron.d/pi-agent-jobs`; it does not edit user crontabs.
+- Pi Scheduler, the Pi CLI, and `~/.pi/agent/models.json` should be available to the configured runtime user.
+- Timestamps are stored in UTC and displayed as Beijing time.
+- Job overlap prevention is always enforced.
