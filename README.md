@@ -46,7 +46,7 @@ deploy/run-local.sh
 Open `http://127.0.0.1:8080`, log in with `admin` / your password.  
 Default password is `pi-scheduler` if the env var is not set — change it before network exposure.
 
-`deploy/run-local.sh` prepares the dedicated runtime user `pi-scheduler-agent` when it can use root/sudo, grants scheduler runtime directory permissions, copies `/root/.pi/agent/models.json` when available, sets local run-user defaults, and writes local cron output to `tmp/pi-agent-jobs` instead of `/etc/cron.d`. The Cron Preview page will mark this as `preview_only` because system cron does not read files under `tmp/`.
+`deploy/run-local.sh` prepares the dedicated runtime user `pi-scheduler-agent` when it can use root/sudo, grants scheduler runtime directory permissions, copies `/root/.pi/agent/models.json` when available, sets local run-user defaults, and writes local cron output to `tmp/pi-agent-jobs` instead of `/etc/cron.d`. The Cron Preview page will mark this as `preview_only` / "Automatic jobs are not active" because system cron does not read files under `tmp/`; scheduled jobs will not run automatically from that file.
 
 ## Install on Ubuntu
 
@@ -216,7 +216,7 @@ The `/logs` page supports filtering by job, group, source, status, and date rang
 
 ### Cron Status
 
-The `/cron` page shows both the generated cron content and whether the configured target appears active. Files under `/etc/cron.d` with matching generated content are shown as `active_candidate`. Local deploy defaults to `tmp/pi-agent-jobs`, which is shown as `preview_only` because system cron does not read it automatically.
+The `/cron` page shows both the generated cron content and whether scheduled jobs should run automatically on the current host. Files under `/etc/cron.d` with matching generated content and an active cron service are shown as active. Local deploy defaults to `tmp/pi-agent-jobs`, which is shown as `preview_only` / "Automatic jobs are not active" because system cron does not read it automatically.
 
 To make local deploy write the system cron file, start it with:
 

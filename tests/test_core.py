@@ -1120,7 +1120,11 @@ def test_cron_status_preview_only_for_non_system_path(tmp_path, monkeypatch):
     status = cron_status.inspect("# generated\n")
 
     assert status["status"] == "preview_only"
+    assert status["automatic_status"] == "not_active"
+    assert status["headline"] == "Automatic jobs are not active"
+    assert "preview-only" in status["summary"]
     assert status["is_system_cron_path"] is False
+    assert any(check["label"] == "System cron path" and check["state"] == "fail" for check in status["checks"])
     assert any("outside /etc/cron.d" in warning for warning in status["warnings"])
     assert any("PI_SCHEDULER_CRON_FILE=/etc/cron.d/pi-agent-jobs" in item for item in status["recommendations"])
 
@@ -1139,9 +1143,13 @@ def test_cron_status_active_candidate_for_matching_system_file(tmp_path, monkeyp
     status = cron_status.inspect(content)
 
     assert status["status"] == "active_candidate"
+    assert status["automatic_status"] == "active"
+    assert status["headline"] == "Automatic jobs are active"
+    assert "cron service is running" in status["summary"]
     assert status["file_exists"] is True
     assert status["content_matches"] is True
     assert status["cron_service_active"] is True
+    assert any(check["label"] == "Cron service" and check["state"] == "pass" for check in status["checks"])
     assert status["warnings"] == []
 
 
@@ -1158,7 +1166,10 @@ def test_cron_status_out_of_sync_for_different_existing_file(tmp_path, monkeypat
     status = cron_status.inspect("# generated\n")
 
     assert status["status"] == "out_of_sync"
+    assert status["automatic_status"] == "not_active"
+    assert status["headline"] == "Automatic jobs need attention"
     assert status["content_matches"] is False
+    assert any(check["label"] == "Content matches generated preview" and check["state"] == "fail" for check in status["checks"])
     assert any("does not match" in warning for warning in status["warnings"])
 
 
@@ -1173,8 +1184,30 @@ def test_cron_status_missing_for_system_target(tmp_path, monkeypatch):
     status = cron_status.inspect("# generated\n")
 
     assert status["status"] == "missing"
+    assert status["automatic_status"] == "not_active"
+    assert status["headline"] == "Automatic jobs are not active"
     assert status["file_exists"] is False
+    assert any(check["label"] == "Target file exists" and check["state"] == "fail" for check in status["checks"])
     assert any("does not exist" in warning for warning in status["warnings"])
+
+
+def test_cron_status_likely_active_when_service_unknown(tmp_path, monkeypatch):
+    from app import cron_status
+
+    target = tmp_path / "etc" / "cron.d" / "pi-agent-jobs"
+    target.parent.mkdir(parents=True)
+    content = "# generated\n* * * * * root echo ok\n"
+    target.write_text(content, encoding="utf-8")
+    monkeypatch.setattr(config, "CRON_FILE", target)
+    monkeypatch.setattr(cron_status, "SYSTEM_CRON_DIR", tmp_path / "etc" / "cron.d")
+    monkeypatch.setattr(cron_status, "_cron_service_active", lambda: None)
+
+    status = cron_status.inspect(content)
+
+    assert status["status"] == "active_candidate"
+    assert status["automatic_status"] == "likely_active"
+    assert status["headline"] == "Automatic jobs are likely active"
+    assert any(check["label"] == "Cron service" and check["state"] == "unknown" for check in status["checks"])
 
 
 def test_validate_cron_expr_rejects_six_fields():
@@ -2303,6 +2336,15 @@ def test_cron_preview_displays_cron_status(tmp_path, monkeypatch):
         "file_owner": None,
         "cron_service_active": None,
         "status": "preview_only",
+        "automatic_status": "not_active",
+        "headline": "Automatic jobs are not active",
+        "summary": "Cron file is only a preview-only file. System cron does not read this path.",
+        "checks": [
+            {"label": "System cron path", "state": "fail", "detail": "Target is outside /etc/cron.d"},
+            {"label": "Target file exists", "state": "fail", "detail": "File is missing"},
+            {"label": "Content matches generated preview", "state": "unknown", "detail": "No target file to compare"},
+            {"label": "Cron service", "state": "unknown", "detail": "Could not confirm with systemctl"},
+        ],
         "warnings": ["Target file is outside /etc/cron.d. System cron will not read this file automatically."],
         "recommendations": ["For active system cron, set PI_SCHEDULER_CRON_FILE=/etc/cron.d/pi-agent-jobs before starting the app."],
     })
@@ -2310,8 +2352,11 @@ def test_cron_preview_displays_cron_status(tmp_path, monkeypatch):
     response = web.cron_preview(Request({"type": "http", "method": "GET", "path": "/cron", "headers": []}))
     html = response.body.decode()
 
-    assert "Cron Status" in html
-    assert "preview_only" in html
+    assert "Automatic Scheduling" in html
+    assert "Automatic jobs are not active" in html
+    assert "Cron file is only a preview-only file" in html
+    assert "System cron path" in html
+    assert "Target file exists" in html
     assert "outside /etc/cron.d" in html
     assert "PI_SCHEDULER_CRON_FILE=/etc/cron.d/pi-agent-jobs" in html
 

@@ -1,40 +1,74 @@
 {% extends "base.html" %}
 {% block title %}Cron Preview - Pi Scheduler{% endblock %}
 {% block content %}
-<section class="panel page-panel">
+<section class="panel page-panel cron-page">
   <div class="section-head">
     <div>
-      <p class="eyebrow">Generated schedule</p>
+      <p class="eyebrow">Automatic schedule</p>
       <h1>Cron Preview</h1>
-      <p class="hint">Target file: <code>{{ cron_file }}</code></p>
+      <p class="hint">Use this page to confirm whether scheduled jobs will run automatically on this host.</p>
     </div>
   </div>
-  <div class="status-card">
-    <h2>Cron Status</h2>
-    <dl>
-      <dt>Configured target</dt><dd><code>{{ cron_status.target_file }}</code></dd>
-      <dt>Status</dt><dd><strong>{{ cron_status.status }}</strong></dd>
-      <dt>System cron path</dt><dd>{{ 'yes' if cron_status.is_system_cron_path else 'no' }}</dd>
-      <dt>File exists</dt><dd>{{ 'yes' if cron_status.file_exists else 'no' }}</dd>
-      <dt>Content matches preview</dt><dd>{{ cron_status.content_matches if cron_status.content_matches is not none else 'unknown' }}</dd>
-      <dt>Owner</dt><dd>{{ cron_status.file_owner or 'unknown' }}</dd>
-      <dt>Mode</dt><dd>{{ cron_status.file_mode or 'unknown' }}</dd>
-      <dt>Cron service active</dt><dd>{{ cron_status.cron_service_active if cron_status.cron_service_active is not none else 'unknown' }}</dd>
+
+  <section class="cron-status-card cron-status-{{ cron_status.automatic_status }}" aria-labelledby="automatic-scheduling-title">
+    <div class="cron-status-summary">
+      <div>
+        <p class="eyebrow">Automatic Scheduling</p>
+        <h2 id="automatic-scheduling-title">{{ cron_status.headline }}</h2>
+        <p>{{ cron_status.summary }}</p>
+      </div>
+      <span class="status-badge status-badge-{{ cron_status.automatic_status }}">{{ cron_status.automatic_status|replace('_', ' ')|title }}</span>
+    </div>
+
+    <div class="cron-target-card">
+      <span>Target file</span>
+      <code>{{ cron_status.target_file }}</code>
+    </div>
+
+    <div class="cron-check-grid" role="list" aria-label="Cron activation checks">
+      {% for check in cron_status.checks %}
+      <div class="cron-check cron-check-{{ check.state }}" role="listitem">
+        <span class="check-icon" aria-hidden="true">{{ '✓' if check.state == 'pass' else '✕' if check.state == 'fail' else '?' }}</span>
+        <div>
+          <strong>{{ check.label }}</strong>
+          <span>{{ check.detail }}</span>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <dl class="cron-meta-grid">
+      <div><dt>Technical status</dt><dd><code>{{ cron_status.status }}</code></dd></div>
+      <div><dt>Owner</dt><dd>{{ cron_status.file_owner or 'unknown' }}</dd></div>
+      <div><dt>Mode</dt><dd>{{ cron_status.file_mode or 'unknown' }}</dd></div>
+      <div><dt>Cron service active</dt><dd>{{ cron_status.cron_service_active if cron_status.cron_service_active is not none else 'unknown' }}</dd></div>
     </dl>
+
     {% if cron_status.warnings %}
-    <h3>Warnings</h3>
-    <ul>
-      {% for warning in cron_status.warnings %}<li>{{ warning }}</li>{% endfor %}
-    </ul>
+    <div class="cron-message-list cron-warnings">
+      <h3>Warnings</h3>
+      <ul>
+        {% for warning in cron_status.warnings %}<li>{{ warning }}</li>{% endfor %}
+      </ul>
+    </div>
     {% endif %}
     {% if cron_status.recommendations %}
-    <h3>Recommended fixes</h3>
-    <ul>
-      {% for recommendation in cron_status.recommendations %}<li><code>{{ recommendation }}</code></li>{% endfor %}
-    </ul>
+    <div class="cron-message-list cron-recommendations">
+      <h3>Recommended fixes</h3>
+      <ul>
+        {% for recommendation in cron_status.recommendations %}<li><code>{{ recommendation }}</code></li>{% endfor %}
+      </ul>
+    </div>
     {% endif %}
-  </div>
+  </section>
+
   {% if error %}<div class="errors" role="alert"><p>{{ error }}</p></div>{% endif %}
+  <div class="section-head log-head">
+    <div>
+      <p class="eyebrow">Generated cron file</p>
+      <h2>Preview content</h2>
+    </div>
+  </div>
   <pre class="log-box" tabindex="0" aria-label="Generated cron file">{{ content }}</pre>
 </section>
 {% endblock %}
