@@ -7,7 +7,8 @@ WorkingDirectory=/opt/pi-scheduler
 Environment=PI_SCHEDULER_HOME=/opt/pi-scheduler
 Environment=PI_SCHEDULER_USERNAME=admin
 Environment=PI_SCHEDULER_PASSWORD=change-this-password
-Environment=PI_SCHEDULER_ALLOWED_RUN_USERS=root,piagent
+Environment=PI_SCHEDULER_CRON_USER=pi-scheduler-agent
+Environment=PI_SCHEDULER_ALLOWED_RUN_USERS=root,pi-scheduler-agent
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
 ExecStart=/opt/pi-scheduler/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8080
 Restart=always

@@ -40,15 +40,13 @@ python3 -m venv .venv
 pip install -r requirements.txt
 
 export PI_SCHEDULER_PASSWORD='set-a-real-password'
-export PI_SCHEDULER_CRON_FILE="$PWD/tmp/pi-agent-jobs"
-
-uvicorn app.main:app --host 127.0.0.1 --port 8080
+deploy/run-local.sh
 ```
 
 Open `http://127.0.0.1:8080`, log in with `admin` / your password.  
 Default password is `pi-scheduler` if the env var is not set — change it before network exposure.
 
-Local cron output goes to `tmp/pi-agent-jobs` instead of `/etc/cron.d`.
+`deploy/run-local.sh` prepares the dedicated runtime user `pi-scheduler-agent` when it can use root/sudo, grants scheduler runtime directory permissions, copies `/root/.pi/agent/models.json` when available, sets local run-user defaults, and writes local cron output to `tmp/pi-agent-jobs` instead of `/etc/cron.d`.
 
 ## Install on Ubuntu
 
@@ -73,6 +71,7 @@ cd /opt/pi-scheduler
 sudo python3 -m venv .venv
 sudo .venv/bin/pip install -r requirements.txt
 sudo chmod +x /opt/pi-scheduler/bin/pi-job-runner
+sudo deploy/setup-runtime-user.sh
 sudo cp deploy/pi-scheduler-web.service /etc/systemd/system/pi-scheduler-web.service
 ```
 
@@ -153,21 +152,18 @@ Standalone jobs use their own run user. Groups use the group run user for the wh
 For safety, non-default users must be allowlisted:
 
 ```bash
-PI_SCHEDULER_ALLOWED_RUN_USERS=root,piagent
+PI_SCHEDULER_ALLOWED_RUN_USERS=root,pi-scheduler-agent
 ```
 
-A typical dedicated user setup:
+For local deploy, the recommended setup command is:
 
 ```bash
-sudo useradd --create-home --shell /bin/bash piagent
-sudo groupadd -f pi-scheduler
-sudo usermod -aG pi-scheduler piagent
-sudo chgrp -R pi-scheduler /opt/pi-scheduler/data /opt/pi-scheduler/logs /opt/pi-scheduler/locks /opt/pi-scheduler/tmp
-sudo chmod -R g+rwX /opt/pi-scheduler/data /opt/pi-scheduler/logs /opt/pi-scheduler/locks /opt/pi-scheduler/tmp
-sudo find /opt/pi-scheduler/data /opt/pi-scheduler/logs /opt/pi-scheduler/locks /opt/pi-scheduler/tmp -type d -exec chmod g+s {} \;
+sudo deploy/setup-runtime-user.sh
 ```
 
-The run user needs Pi CLI credentials and model configuration under its own home directory, for example `/home/piagent/.pi/agent/`.
+It creates `pi-scheduler-agent`, creates/reuses the `pi-scheduler` group, grants scheduler runtime directory permissions, and copies `/root/.pi/agent/models.json` to `/home/pi-scheduler-agent/.pi/agent/models.json` when the source exists.
+
+The run user needs Pi CLI credentials and model configuration under its own home directory, for example `/home/pi-scheduler-agent/.pi/agent/`.
 
 Manual Run Now uses the configured run user by launching `bin/pi-job-runner --source manual`. If the web service runs as root, it switches users with `sudo -u` or `runuser`. If it cannot switch users, the manual run is rejected instead of running as the wrong user.
 
@@ -243,8 +239,11 @@ locks/groups/<group-id>.lock       Per-group concurrency lock
 | `PI_MODELS_FILE` | `~/.pi/agent/models.json` | Read-only model config |
 | `PI_SCHEDULER_USERNAME` | `admin` | Basic Auth username |
 | `PI_SCHEDULER_PASSWORD` | `pi-scheduler` | Basic Auth password |
-| `PI_SCHEDULER_CRON_USER` | `root` | Default user in cron entries |
+| `PI_SCHEDULER_CRON_USER` | `root` | Default user in cron entries. `deploy/run-local.sh` defaults this to `pi-scheduler-agent`. |
 | `PI_SCHEDULER_ALLOWED_RUN_USERS` | `<cron user>` | Comma-separated allowlist for per-job/per-group Linux run users. Empty means only `PI_SCHEDULER_CRON_USER` is allowed. |
+| `PI_SCHEDULER_RUNTIME_USER` | `pi-scheduler-agent` | Dedicated runtime user expected by setup scripts and startup health checks |
+| `PI_SCHEDULER_RUNTIME_GROUP` | `pi-scheduler` | Runtime group granted write access to scheduler data/log/lock/tmp directories |
+| `PI_SCHEDULER_MODELS_SOURCE` | `/root/.pi/agent/models.json` | Source model config copied by `deploy/setup-runtime-user.sh` |
 | `PI_SCHEDULER_LOG_RETENTION_DAYS` | `30` | Auto-cleanup cutoff |
 
 ## Database Schema
