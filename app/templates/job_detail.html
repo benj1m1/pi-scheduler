@@ -39,34 +39,6 @@
     <dt>Timeout</dt><dd>{{ job.timeout_seconds }} seconds</dd>
     <dt>Overlap</dt><dd>{{ 'prevented' if job.prevent_overlap else 'allowed' }}</dd>
   </dl>
-  <section class="risk-profile" aria-labelledby="risk-profile-title">
-    <div class="section-head risk-profile-head">
-      <div>
-        <p class="eyebrow">Risk profile</p>
-        <h2 id="risk-profile-title">Job options by risk</h2>
-        <p class="hint">Configuration grouped by operational risk so high-impact choices stand out.</p>
-      </div>
-    </div>
-    <div class="risk-grid">
-      {% for group in risk_groups %}
-      <section class="risk-card risk-card-{{ group.level }}">
-        <div class="risk-card-head">
-          <span class="risk-dot" aria-hidden="true"></span>
-          <h3>{{ group.title }}</h3>
-        </div>
-        {% if group['items'] %}
-        <dl class="risk-list">
-          {% for item in group['items'] %}
-          <dt>{{ item.label }}</dt><dd>{{ item.value }}</dd>
-          {% endfor %}
-        </dl>
-        {% else %}
-        <p class="hint">No active high-impact options in this category.</p>
-        {% endif %}
-      </section>
-      {% endfor %}
-    </div>
-  </section>
   <div class="actions">
     <a class="button" href="/jobs/{{ job.id }}/edit">Edit</a>
     <form method="post" action="/jobs/{{ job.id }}/toggle">

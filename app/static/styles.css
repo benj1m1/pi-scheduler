@@ -280,27 +280,6 @@ p { line-height: 1.55; }
 .danger-light { color: #9f2f24; }
 .add-member-button { margin-top: var(--space-3); }
 
-.risk-profile { display: grid; gap: var(--space-4); margin-top: var(--space-5); }
-.risk-profile-head { margin-bottom: 0; }
-.risk-grid { display: grid; gap: var(--space-3); grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
-.risk-card {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-sm);
-  display: grid;
-  gap: var(--space-3);
-  padding: var(--space-4);
-}
-.risk-card-success { background: var(--success-bg); border-color: rgb(47 125 50 / 28%); color: var(--success-text); }
-.risk-card-warning { background: var(--warning-bg); border-color: rgb(181 106 0 / 30%); color: var(--warning-text); }
-.risk-card-danger { background: var(--danger-bg); border-color: var(--danger-border); color: var(--danger); }
-.risk-card-head { align-items: center; display: flex; gap: 0.55rem; }
-.risk-card h3 { color: inherit; margin: 0; }
-.risk-dot { background: currentColor; border-radius: 999px; box-shadow: 0 0 0 4px rgb(255 255 255 / 42%); height: 0.72rem; width: 0.72rem; }
-.risk-list { display: grid; gap: 0.55rem; grid-template-columns: minmax(6.5rem, auto) minmax(0, 1fr); margin: 0; }
-.risk-list dt { color: inherit; font-weight: 900; opacity: 0.82; }
-.risk-list dd { color: inherit; font-weight: 750; margin: 0; overflow-wrap: anywhere; }
-
 dl { display: grid; gap: 0.45rem 0.9rem; grid-template-columns: 6.5rem 1fr; margin: 0; }
 .wide { grid-template-columns: 8.5rem 1fr; }
 .stats-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); text-align: center; }
