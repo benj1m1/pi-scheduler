@@ -694,9 +694,14 @@ def manual_group_run(
     background_tasks: BackgroundTasks,
     return_to: Annotated[str, Form()] = "",
 ):
-    if db.get_group(group_id) is None:
+    group = db.get_group(group_id)
+    if group is None:
         raise HTTPException(status_code=404, detail="Group not found")
-    background_tasks.add_task(runner.run_group, group_id, source="manual")
+    try:
+        command = run_users.manual_runner_command("--group-id", group_id, group.get("run_user"))
+    except run_users.RunUserError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    background_tasks.add_task(run_users.launch_command, command)
     if return_to == "index":
         return redirect_to(f"/?queued={group_id}")
     return redirect_to(f"/groups/{group_id}?queued=1")
@@ -920,9 +925,14 @@ def manual_run(
     background_tasks: BackgroundTasks,
     return_to: Annotated[str, Form()] = "",
 ):
-    if db.get_job(job_id) is None:
+    job = db.get_job(job_id)
+    if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
-    background_tasks.add_task(runner.run_job, job_id, source="manual")
+    try:
+        command = run_users.manual_runner_command("--job-id", job_id, job.get("run_user"))
+    except run_users.RunUserError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    background_tasks.add_task(run_users.launch_command, command)
     if return_to == "index":
         return redirect_to(f"/?queued={job_id}")
     return redirect_to(f"/jobs/{job_id}?queued=1")

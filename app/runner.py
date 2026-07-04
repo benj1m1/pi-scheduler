@@ -551,10 +551,11 @@ def main() -> int:
     target = parser.add_mutually_exclusive_group(required=True)
     target.add_argument("--job-id")
     target.add_argument("--group-id")
+    parser.add_argument("--source", choices=["auto", "manual"], default="auto")
     args = parser.parse_args()
     if args.group_id:
-        return run_group(args.group_id)
-    return run_job(args.job_id)
+        return run_group(args.group_id, source=args.source)
+    return run_job(args.job_id, source=args.source)
 
 
 if __name__ == "__main__":

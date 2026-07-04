@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import getpass
+import os
 import pwd
 import re
+import shutil
+import subprocess
 
 from . import config
 
@@ -50,3 +54,33 @@ def validate_run_user(value: str | None) -> None:
         pwd.getpwnam(user)
     except KeyError as exc:
         raise RunUserError(f"Run user '{user}' does not exist on this system") from exc
+
+
+def manual_runner_command(target_flag: str, target_id: str, run_user_value: str | None, source: str = "manual") -> list[str]:
+    if target_flag not in {"--job-id", "--group-id"}:
+        raise RunUserError("Manual runner target is invalid")
+    validate_run_user(run_user_value)
+    target_user = effective_run_user(run_user_value)
+    runner_args = [config.RUNNER_PATH, target_flag, target_id, "--source", source]
+    current_user = getpass.getuser()
+    if current_user == target_user:
+        return runner_args
+    if os.geteuid() != 0:
+        raise RunUserError(
+            f"Manual run cannot switch from {current_user} to {target_user}; run the web service as root or configure user switching"
+        )
+    sudo = shutil.which("sudo")
+    if sudo:
+        return [sudo, "-u", target_user, *runner_args]
+    runuser = shutil.which("runuser")
+    if runuser:
+        return [runuser, "-u", target_user, "--", *runner_args]
+    raise RunUserError("Manual run cannot switch users because neither sudo nor runuser is available")
+
+
+def launch_command(command: list[str]) -> None:
+    subprocess.Popen(command, cwd=str(config.SCHEDULER_HOME), start_new_session=True)
+
+
+def launch_manual_runner(target_flag: str, target_id: str, run_user_value: str | None) -> None:
+    launch_command(manual_runner_command(target_flag, target_id, run_user_value))

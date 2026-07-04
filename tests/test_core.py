@@ -689,6 +689,75 @@ def test_render_cron_file_adds_discovered_pi_node_bin_to_path(tmp_path, monkeypa
     assert path_line.index(str(pi_bin)) < path_line.index("/usr/local/bin")
 
 
+def test_manual_runner_command_direct_when_already_target_user(monkeypatch):
+    from app import run_users
+
+    monkeypatch.setattr(config, "RUNNER_PATH", "/opt/pi-scheduler/bin/pi-job-runner")
+    monkeypatch.setattr(config, "CRON_USER", "piagent")
+    monkeypatch.setattr(config, "ALLOWED_RUN_USERS", "piagent", raising=False)
+    monkeypatch.setattr(run_users.pwd, "getpwnam", lambda name: object())
+    monkeypatch.setattr(run_users.getpass, "getuser", lambda: "piagent")
+    monkeypatch.setattr(run_users.os, "geteuid", lambda: 1001)
+
+    assert run_users.manual_runner_command("--job-id", "job-a", None) == [
+        "/opt/pi-scheduler/bin/pi-job-runner",
+        "--job-id",
+        "job-a",
+        "--source",
+        "manual",
+    ]
+
+
+def test_manual_runner_command_uses_sudo_from_root(monkeypatch):
+    from app import run_users
+
+    monkeypatch.setattr(config, "RUNNER_PATH", "/opt/pi-scheduler/bin/pi-job-runner")
+    monkeypatch.setattr(config, "CRON_USER", "root")
+    monkeypatch.setattr(config, "ALLOWED_RUN_USERS", "root,piagent", raising=False)
+    monkeypatch.setattr(run_users.pwd, "getpwnam", lambda name: object())
+    monkeypatch.setattr(run_users.getpass, "getuser", lambda: "root")
+    monkeypatch.setattr(run_users.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(run_users.shutil, "which", lambda name: "/usr/bin/sudo" if name == "sudo" else None)
+
+    assert run_users.manual_runner_command("--group-id", "flow", "piagent") == [
+        "/usr/bin/sudo",
+        "-u",
+        "piagent",
+        "/opt/pi-scheduler/bin/pi-job-runner",
+        "--group-id",
+        "flow",
+        "--source",
+        "manual",
+    ]
+
+
+def test_manual_runner_command_rejects_switch_from_non_root(monkeypatch):
+    from app import run_users
+
+    monkeypatch.setattr(config, "RUNNER_PATH", "/opt/pi-scheduler/bin/pi-job-runner")
+    monkeypatch.setattr(config, "CRON_USER", "root")
+    monkeypatch.setattr(config, "ALLOWED_RUN_USERS", "root,piagent", raising=False)
+    monkeypatch.setattr(run_users.pwd, "getpwnam", lambda name: object())
+    monkeypatch.setattr(run_users.getpass, "getuser", lambda: "bjli")
+    monkeypatch.setattr(run_users.os, "geteuid", lambda: 1000)
+
+    try:
+        run_users.manual_runner_command("--job-id", "job-a", "piagent")
+    except run_users.RunUserError as exc:
+        assert "cannot switch" in str(exc).lower()
+    else:
+        raise AssertionError("Expected non-root switch rejection")
+
+
+def test_runner_cli_accepts_manual_source(monkeypatch):
+    calls = []
+    monkeypatch.setattr(runner, "run_job", lambda job_id, source="auto": calls.append((job_id, source)) or 0)
+    monkeypatch.setattr("sys.argv", ["pi-job-runner", "--job-id", "job-a", "--source", "manual"])
+
+    assert runner.main() == 0
+    assert calls == [("job-a", "manual")]
+
+
 def test_db_persists_job_run_user(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
     monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
