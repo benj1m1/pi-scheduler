@@ -536,6 +536,62 @@ def test_pi_events_to_transcript_includes_thinking_and_tools():
     assert '"output": "ok"' in transcript
 
 
+def test_run_user_allowlist_defaults_to_cron_user(monkeypatch):
+    from app import run_users
+
+    monkeypatch.setattr(config, "CRON_USER", "root")
+    monkeypatch.setattr(config, "ALLOWED_RUN_USERS", "", raising=False)
+
+    assert run_users.allowed_run_users() == ["root"]
+    assert run_users.effective_run_user(None) == "root"
+    assert run_users.effective_run_user("") == "root"
+    assert run_users.describe_run_user(None) == "default (root)"
+
+
+def test_validate_run_user_rejects_unsafe_and_unallowed_users(monkeypatch):
+    from app import run_users
+
+    monkeypatch.setattr(config, "CRON_USER", "root")
+    monkeypatch.setattr(config, "ALLOWED_RUN_USERS", "root,piagent", raising=False)
+    monkeypatch.setattr(run_users.pwd, "getpwnam", lambda name: object())
+
+    run_users.validate_run_user(None)
+    run_users.validate_run_user("piagent")
+
+    for value in ["bad user", "bad;user", "../root"]:
+        try:
+            run_users.validate_run_user(value)
+        except run_users.RunUserError as exc:
+            assert "invalid" in str(exc).lower()
+        else:
+            raise AssertionError(f"Expected invalid username rejection for {value}")
+
+    try:
+        run_users.validate_run_user("bjli")
+    except run_users.RunUserError as exc:
+        assert "not allowed" in str(exc).lower()
+    else:
+        raise AssertionError("Expected allowlist rejection")
+
+
+def test_validate_run_user_rejects_missing_system_user(monkeypatch):
+    from app import run_users
+
+    def missing_user(name):
+        raise KeyError(name)
+
+    monkeypatch.setattr(config, "CRON_USER", "root")
+    monkeypatch.setattr(config, "ALLOWED_RUN_USERS", "root,ghost", raising=False)
+    monkeypatch.setattr(run_users.pwd, "getpwnam", missing_user)
+
+    try:
+        run_users.validate_run_user("ghost")
+    except run_users.RunUserError as exc:
+        assert "does not exist" in str(exc).lower()
+    else:
+        raise AssertionError("Expected missing system user rejection")
+
+
 def test_render_cron_file_adds_discovered_pi_node_bin_to_path(tmp_path, monkeypatch):
     pi_bin = tmp_path / "pi-node" / "node-v1" / "bin"
     pi_bin.mkdir(parents=True)

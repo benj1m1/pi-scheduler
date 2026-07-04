@@ -16,6 +16,7 @@ PI_NODE_ROOT = Path(os.environ.get("PI_NODE_ROOT", "~/.local/share/pi-node")).ex
 DEFAULT_CRON_PATH = os.environ.get("PI_SCHEDULER_CRON_PATH", "/usr/local/bin:/usr/bin:/bin")
 PI_MODELS_FILE = Path(os.environ.get("PI_MODELS_FILE", "~/.pi/agent/models.json")).expanduser().resolve()
 CRON_USER = os.environ.get("PI_SCHEDULER_CRON_USER", "root")
+ALLOWED_RUN_USERS = os.environ.get("PI_SCHEDULER_ALLOWED_RUN_USERS", "")
 ADMIN_USERNAME = os.environ.get("PI_SCHEDULER_USERNAME", "admin")
 ADMIN_PASSWORD = os.environ.get("PI_SCHEDULER_PASSWORD", "pi-scheduler")
 LOG_RETENTION_DAYS = int(os.environ.get("PI_SCHEDULER_LOG_RETENTION_DAYS", "30"))
