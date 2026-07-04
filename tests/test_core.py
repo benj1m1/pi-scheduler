@@ -780,6 +780,38 @@ def test_runner_cli_accepts_manual_source(monkeypatch):
     assert calls == [("job-a", "manual")]
 
 
+def test_runtime_setup_accepts_valid_mocked_setup(tmp_path, monkeypatch):
+    from app import runtime_setup
+
+    models = tmp_path / "home" / "pi-scheduler-agent" / ".pi" / "agent" / "models.json"
+    models.parent.mkdir(parents=True)
+    models.write_text('{"providers": []}', encoding="utf-8")
+
+    class Pw:
+        pw_dir = str(tmp_path / "home" / "pi-scheduler-agent")
+
+    monkeypatch.setattr(config, "RUNTIME_USER", "pi-scheduler-agent")
+    monkeypatch.setattr(config, "ALLOWED_RUN_USERS", "root,pi-scheduler-agent", raising=False)
+    monkeypatch.setattr(runtime_setup.pwd, "getpwnam", lambda name: Pw())
+    monkeypatch.setattr(runtime_setup.pwd, "getpwuid", lambda uid: type("Owner", (), {"pw_name": "pi-scheduler-agent"})())
+
+    assert runtime_setup.check_runtime_setup() == []
+
+
+def test_startup_logs_runtime_setup_warnings(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "LOCK_DIR", tmp_path / "locks")
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "data" / "pi-scheduler.sqlite3")
+    monkeypatch.setattr(config, "CRON_FILE", tmp_path / "cron")
+    monkeypatch.setattr(web.runtime_setup, "log_runtime_setup_warnings", lambda: calls.append("checked") or [])
+
+    web.startup()
+
+    assert calls == ["checked"]
+
+
 def test_db_persists_job_run_user(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
     monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")

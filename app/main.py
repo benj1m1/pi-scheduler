@@ -14,7 +14,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import config, cron, db, pi_models, retention, runner, run_users, work_window
+from . import config, cron, db, pi_models, retention, runner, run_users, runtime_setup, work_window
 
 
 app = FastAPI(title="Pi Scheduler")
@@ -200,6 +200,7 @@ def require_auth(credentials: Annotated[HTTPBasicCredentials, Depends(security)]
 def startup() -> None:
     db.init_db()
     retention.cleanup_old_logs()
+    runtime_setup.log_runtime_setup_warnings()
     cron.write_cron_file()
 
 
