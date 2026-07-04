@@ -32,9 +32,37 @@ def test_form_data_forces_overlap_prevention():
         "",
         "on",
         None,
+        "none",
+        "",
     )
 
     assert data["prevent_overlap"] == 1
+    assert data["skills_mode"] == "none"
+    assert data["skill_paths"] == ""
+
+
+def test_job_form_data_accepts_approved_skill_paths():
+    data = web.form_data(
+        "pi-agent",
+        "check logs",
+        "5",
+        "minutes",
+        "",
+        "summary",
+        "no_session",
+        "full",
+        "",
+        "",
+        "240",
+        "",
+        "on",
+        None,
+        "approved",
+        "/opt/pi-scheduler/skills/safe\n/home/pi-scheduler-agent/.pi/agent/approved-skills/pdf",
+    )
+
+    assert data["skills_mode"] == "approved"
+    assert data["skill_paths"] == "/opt/pi-scheduler/skills/safe\n/home/pi-scheduler-agent/.pi/agent/approved-skills/pdf"
 
 
 def test_job_form_data_includes_run_user(monkeypatch):
@@ -59,6 +87,8 @@ def test_job_form_data_includes_run_user(monkeypatch):
         "piagent",
         "on",
         None,
+        "none",
+        "",
     )
 
     assert data["run_user"] == "piagent"
@@ -110,6 +140,8 @@ def test_validate_job_form_rejects_invalid_run_user(monkeypatch):
         "bad user",
         "on",
         None,
+        "none",
+        "",
     )
 
     assert "Run user is invalid" in web.validate_job_form(data)
@@ -450,9 +482,9 @@ def test_build_command_uses_argv():
         {"task_prompt": "Run the servicenow-agent skill"}
     )
     assert argv[0] == "pi"
-    assert argv[1:3] == ["--mode", "json"]
-    assert argv[3] == "Run the servicenow-agent skill"
-    assert display.startswith("pi --mode json")
+    assert argv[1:4] == ["--no-skills", "--mode", "json"]
+    assert argv[4] == "Run the servicenow-agent skill"
+    assert display.startswith("pi --no-skills --mode json")
 
 
 def test_build_command_supports_summary_without_session():
@@ -467,6 +499,7 @@ def test_build_command_supports_summary_without_session():
 
     assert argv == [
         "pi",
+        "--no-skills",
         "--no-session",
         "--name",
         "pi-scheduler: pi-agent",
@@ -491,6 +524,7 @@ def test_build_command_supports_read_only_tools():
 
     assert argv == [
         "pi",
+        "--no-skills",
         "--no-session",
         "--tools",
         "read,grep,find,ls",
@@ -512,7 +546,7 @@ def test_build_command_supports_no_tools():
         }
     )
 
-    assert argv == ["pi", "--no-session", "--no-tools", "-p", "summarize status"]
+    assert argv == ["pi", "--no-skills", "--no-session", "--no-tools", "-p", "summarize status"]
     assert "--no-tools" in display
 
 
@@ -528,10 +562,64 @@ def test_validate_job_form_rejects_invalid_tool_mode():
         "output_mode": "summary",
         "session_mode": "no_session",
         "tool_mode": "write_only",
+        "skills_mode": "none",
+        "skill_paths": "",
         "timeout_seconds": "240",
     }
 
     assert "Tool access is invalid" in web.validate_job_form(data)
+
+
+def test_build_command_disables_skills_by_default():
+    argv, display = runner.build_command(
+        {
+            "task_prompt": "summarize status",
+            "output_mode": "summary",
+            "session_mode": "no_session",
+        }
+    )
+
+    assert argv == ["pi", "--no-skills", "--no-session", "-p", "summarize status"]
+    assert "--no-skills" in display
+
+
+def test_build_command_loads_only_approved_skill_paths():
+    argv, display = runner.build_command(
+        {
+            "task_prompt": "summarize status",
+            "output_mode": "summary",
+            "session_mode": "no_session",
+            "skills_mode": "approved",
+            "skill_paths": "/opt/pi-scheduler/skills/safe\n/home/pi-scheduler-agent/.pi/agent/approved-skills/pdf",
+        }
+    )
+
+    assert argv == [
+        "pi",
+        "--no-skills",
+        "--skill",
+        "/opt/pi-scheduler/skills/safe",
+        "--skill",
+        "/home/pi-scheduler-agent/.pi/agent/approved-skills/pdf",
+        "--no-session",
+        "-p",
+        "summarize status",
+    ]
+    assert "--skill /opt/pi-scheduler/skills/safe" in display
+
+
+def test_build_command_can_use_runtime_default_skills():
+    argv, _ = runner.build_command(
+        {
+            "task_prompt": "summarize status",
+            "output_mode": "summary",
+            "session_mode": "no_session",
+            "skills_mode": "runtime",
+        }
+    )
+
+    assert "--no-skills" not in argv
+    assert "--skill" not in argv
 
 
 def test_list_configured_models_omits_provider_secrets(tmp_path, monkeypatch):
@@ -573,8 +661,8 @@ def test_build_command_includes_configured_provider_model(tmp_path, monkeypatch)
         }
     )
 
-    assert argv[1:7] == ["--mode", "json", "--provider", "local-llama", "--model", "qwen-local"]
-    assert argv[7] == "custom prompt"
+    assert argv[1:8] == ["--no-skills", "--mode", "json", "--provider", "local-llama", "--model", "qwen-local"]
+    assert argv[8] == "custom prompt"
     assert "--provider local-llama --model qwen-local" in display
 
 
@@ -1830,6 +1918,7 @@ def test_summary_mode_runs_print_and_writes_summary_without_jsonl(tmp_path, monk
     assert exit_code == 0
     assert captured["argv"] == [
         "pi",
+        "--no-skills",
         "--no-session",
         "--name",
         "pi-scheduler: pi-agent",
@@ -1887,6 +1976,7 @@ def test_events_mode_runs_json_and_writes_transcript_and_jsonl(tmp_path, monkeyp
     assert exit_code == 0
     assert captured["argv"] == [
         "pi",
+        "--no-skills",
         "--name",
         "pi-scheduler: pi-agent",
         "--mode",

@@ -118,7 +118,7 @@ pi --no-session --name 'pi-scheduler: <job name>' -p --provider <provider> --mod
 When no model is selected, Pi uses its default behavior:
 
 ```bash
-pi --no-session --name 'pi-scheduler: <job name>' -p "<prompt>"
+pi --no-skills --no-session --name 'pi-scheduler: <job name>' -p "<prompt>"
 ```
 
 ### Run Output, Sessions & Tools
@@ -132,9 +132,12 @@ pi --no-session --name 'pi-scheduler: <job name>' -p "<prompt>"
 | Tool access | **Full tools** — Pi defaults |
 | | **Read-only** — `--tools read,grep,find,ls` (no `bash`) |
 | | **No tools** — `--no-tools` |
+| Skills policy | **No skills** — appends `--no-skills` |
+| | **Approved skill paths only** — appends `--no-skills --skill <path>` for each configured path |
+| | **Runtime user default skills** — lets Pi discover skills from the runtime user's normal Pi environment |
 
-Defaults for new jobs: Summary only, Do not save session, Full tools.  
-Legacy databases (pre-output/session/tool settings) migrate existing jobs to Detailed event log, Save session, Full tools.
+Defaults for new jobs: Summary only, Do not save session, Full tools, No skills.  
+Legacy databases migrate existing jobs to safe skills behavior (`No skills`) while preserving older output/session/tool defaults.
 
 ### Work Windows
 
@@ -310,7 +313,7 @@ All routes require Basic Auth.
 
 - The web app only manages `/etc/cron.d/pi-agent-jobs`. It does not touch user crontabs or other system cron files.
 - If scheduled runs don't appear, verify the cron file exists and `cron.service` is active.
-- Pi Scheduler, the Pi CLI, `~/.pi/agent/models.json`, and `~/.pi/agent/skills/` should belong to the same runtime user.
+- Pi Scheduler, the Pi CLI, and `~/.pi/agent/models.json` should belong to the same runtime user. Skills are disabled by default for scheduled jobs; only use runtime-user skills or approved skill paths when a job explicitly needs them.
 - Job overlap prevention is always enforced (`prevent_overlap` forced to 1).
 
 ## Dependencies

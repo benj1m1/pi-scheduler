@@ -56,6 +56,18 @@
         </select>
       </label>
       <p class="hint">Read-only tools allow <code>read</code>, <code>grep</code>, <code>find</code>, and <code>ls</code>. No tools disables all Pi tools.</p>
+      <label>Skills policy
+        <select name="skills_mode" required>
+          <option value="none" {% if job.skills_mode == 'none' %}selected{% endif %}>No skills</option>
+          <option value="approved" {% if job.skills_mode == 'approved' %}selected{% endif %}>Approved skill paths only</option>
+          <option value="runtime" {% if job.skills_mode == 'runtime' %}selected{% endif %}>Runtime user default skills</option>
+        </select>
+      </label>
+      <p class="hint">Default is <code>No skills</code>, which invokes <code>pi --no-skills</code>. Approved paths use <code>--no-skills --skill &lt;path&gt;</code>.</p>
+      <label>Approved skill paths
+        <textarea name="skill_paths" placeholder="/home/pi-scheduler-agent/.pi/agent/approved-skills/pdf">{{ job.skill_paths }}</textarea>
+      </label>
+      <p class="hint">One absolute file or directory path per line. Used only when Skills policy is Approved skill paths only.</p>
     </fieldset>
     <fieldset>
       <legend>Run user</legend>

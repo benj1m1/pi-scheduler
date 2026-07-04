@@ -39,9 +39,25 @@ def tool_mode(job: dict) -> str:
     return value if value in {"read_only", "no_tools"} else "full"
 
 
+def skills_mode(job: dict) -> str:
+    value = job.get("skills_mode")
+    return value if value in {"approved", "runtime"} else "none"
+
+
+def skill_paths(job: dict) -> list[str]:
+    raw = str(job.get("skill_paths") or "")
+    return [line.strip() for line in raw.splitlines() if line.strip()]
+
+
 def build_command(job: dict, validate_model: bool = True) -> tuple[list[str], str]:
     prompt = build_prompt(job)
     argv = [config.PI_BINARY]
+    selected_skills_mode = skills_mode(job)
+    if selected_skills_mode in {"none", "approved"}:
+        argv.append("--no-skills")
+    if selected_skills_mode == "approved":
+        for path in skill_paths(job):
+            argv.extend(["--skill", path])
     if session_mode(job) == "no_session":
         argv.append("--no-session")
     selected_tool_mode = tool_mode(job)

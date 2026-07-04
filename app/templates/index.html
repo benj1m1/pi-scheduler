@@ -89,6 +89,7 @@
       <dt>Model</dt><dd>{{ job.provider_name ~ '/' ~ job.model_id if job.provider_name and job.model_id else 'Pi default' }}</dd>
       <dt>Schedule</dt><dd>{{ job.cron_expr|describe_cron }}</dd>
       <dt>Work</dt><dd>{{ job.work_start|describe_work_window(job.work_end) }}</dd>
+      <dt>Skills</dt><dd>{{ job.skills_mode|describe_skills_mode }}</dd>
       <dt>Run as</dt><dd>{{ job.run_user|describe_run_user }}</dd>
       <dt>Next check</dt><dd>{{ job.next_run|beijing_time or 'not scheduled' }}</dd>
       <dt>Last</dt><dd>{{ job.last_status or 'never run' }} {{ job.last_finished_at|beijing_time }}</dd>

@@ -40,6 +40,9 @@ LOG_STATUS_FILTERS = {
 OUTPUT_MODES = {"summary", "events"}
 SESSION_MODES = {"save", "no_session"}
 TOOL_MODES = {"full", "read_only", "no_tools"}
+SKILLS_MODES = {"none", "approved", "runtime"}
+
+
 def hour_options() -> list[dict[str, str]]:
     options = []
     for hour in range(24):
@@ -64,6 +67,14 @@ def beijing_time(value: str | None) -> str:
 
 def seconds_duration(value: int | None) -> str:
     return str(math.ceil((value or 0) / 1000))
+
+
+def describe_skills_mode(value: str | None) -> str:
+    if value == "approved":
+        return "Approved skill paths only"
+    if value == "runtime":
+        return "Runtime user default skills"
+    return "No skills"
 
 
 def run_status_class(status_value: str) -> str:
@@ -181,6 +192,7 @@ templates.env.filters["seconds_duration"] = seconds_duration
 templates.env.filters["describe_cron"] = cron.describe_cron
 templates.env.filters["describe_work_window"] = work_window.describe
 templates.env.filters["describe_run_user"] = run_users.describe_run_user
+templates.env.filters["describe_skills_mode"] = describe_skills_mode
 templates.env.filters["group_run_path"] = group_run_path
 
 
@@ -248,6 +260,16 @@ def validate_job_form(data: dict) -> list[str]:
         errors.append("Session mode is invalid")
     if data.get("tool_mode") not in TOOL_MODES:
         errors.append("Tool access is invalid")
+    if data.get("skills_mode") not in SKILLS_MODES:
+        errors.append("Skills policy is invalid")
+    if data.get("skills_mode") == "approved":
+        paths = [line.strip() for line in str(data.get("skill_paths") or "").splitlines() if line.strip()]
+        if not paths:
+            errors.append("At least one skill path is required for approved skills")
+        for path in paths:
+            if not Path(path).is_absolute():
+                errors.append("Skill paths must be absolute")
+                break
     try:
         timeout = int(data["timeout_seconds"])
         if timeout < 10 or timeout > 3600:
@@ -272,6 +294,8 @@ def form_data(
     run_user: str,
     enabled: str | None,
     prevent_overlap: str | None,
+    skills_mode: str = "none",
+    skill_paths: str = "",
 ) -> dict:
     cron_expr = ""
     schedule_error = None
@@ -301,6 +325,8 @@ def form_data(
         "output_mode": output_mode,
         "session_mode": session_mode,
         "tool_mode": tool_mode,
+        "skills_mode": skills_mode,
+        "skill_paths": skill_paths.strip(),
         "work_start": work_start.strip() or None,
         "work_end": work_end.strip() or None,
         "timeout_seconds": timeout_seconds.strip(),
@@ -324,6 +350,8 @@ def with_schedule(job: dict) -> dict:
     job["output_mode"] = job.get("output_mode") or "summary"
     job["session_mode"] = job.get("session_mode") or "no_session"
     job["tool_mode"] = job.get("tool_mode") or "full"
+    job["skills_mode"] = job.get("skills_mode") or "none"
+    job["skill_paths"] = job.get("skill_paths") or ""
     job["run_user"] = job.get("run_user") or ""
     return job
 
@@ -477,6 +505,8 @@ def new_job(request: Request):
         "output_mode": "summary",
         "session_mode": "no_session",
         "tool_mode": "full",
+        "skills_mode": "none",
+        "skill_paths": "",
         "run_user": "",
     }
     return templates.TemplateResponse(
@@ -500,6 +530,8 @@ def create_job(
     output_mode: Annotated[str, Form()] = "summary",
     session_mode: Annotated[str, Form()] = "no_session",
     tool_mode: Annotated[str, Form()] = "full",
+    skills_mode: Annotated[str, Form()] = "none",
+    skill_paths: Annotated[str, Form()] = "",
     run_user: Annotated[str, Form()] = "",
     enabled: Annotated[str | None, Form()] = None,
     prevent_overlap: Annotated[str | None, Form()] = None,
@@ -519,6 +551,8 @@ def create_job(
         run_user,
         enabled,
         prevent_overlap,
+        skills_mode,
+        skill_paths,
     )
     errors = validate_job_form(data)
     if errors:
@@ -859,6 +893,8 @@ def update_job(
     output_mode: Annotated[str, Form()] = "summary",
     session_mode: Annotated[str, Form()] = "no_session",
     tool_mode: Annotated[str, Form()] = "full",
+    skills_mode: Annotated[str, Form()] = "none",
+    skill_paths: Annotated[str, Form()] = "",
     run_user: Annotated[str, Form()] = "",
     enabled: Annotated[str | None, Form()] = None,
     prevent_overlap: Annotated[str | None, Form()] = None,
@@ -880,6 +916,8 @@ def update_job(
         run_user,
         enabled,
         prevent_overlap,
+        skills_mode,
+        skill_paths,
     )
     errors = validate_job_form(data)
     if errors:
