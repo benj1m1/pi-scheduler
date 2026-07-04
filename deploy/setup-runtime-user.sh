@@ -5,6 +5,7 @@ RUNTIME_USER="pi-scheduler-agent"
 RUNTIME_GROUP="pi-scheduler"
 SCHEDULER_HOME="/opt/pi-scheduler"
 MODELS_FILE="/root/.pi/agent/models.json"
+APPROVED_SKILLS_DIR="${PI_SCHEDULER_APPROVED_SKILLS_DIR:-/opt/pi-scheduler/approved-skills}"
 
 usage() {
   cat <<'USAGE'
@@ -15,6 +16,8 @@ Options:
   --group NAME         Runtime group (default: pi-scheduler)
   --home PATH          Scheduler home (default: /opt/pi-scheduler)
   --models-file PATH   Source models.json (default: /root/.pi/agent/models.json)
+  --approved-skills-dir PATH
+                       Approved skills catalog (default: /opt/pi-scheduler/approved-skills)
   --help               Show this help
 USAGE
 }
@@ -35,6 +38,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --models-file)
       MODELS_FILE="$2"
+      shift 2
+      ;;
+    --approved-skills-dir)
+      APPROVED_SKILLS_DIR="$2"
       shift 2
       ;;
     --help)
@@ -67,6 +74,8 @@ usermod -aG "${RUNTIME_GROUP}" "${RUNTIME_USER}"
 for dir in "${SCHEDULER_HOME}/data" "${SCHEDULER_HOME}/logs" "${SCHEDULER_HOME}/locks" "${SCHEDULER_HOME}/tmp"; do
   mkdir -p "${dir}"
 done
+install -d -o root -g "$RUNTIME_GROUP" -m 0750 "$APPROVED_SKILLS_DIR"
+echo "Approved skills directory: $APPROVED_SKILLS_DIR"
 
 chgrp -R "${RUNTIME_GROUP}" \
   "${SCHEDULER_HOME}/data" \

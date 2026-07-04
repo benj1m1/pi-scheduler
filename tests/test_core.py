@@ -993,6 +993,8 @@ def test_setup_runtime_user_script_syntax_and_defaults():
     assert 'RUNTIME_USER="pi-scheduler-agent"' in content
     assert 'RUNTIME_GROUP="pi-scheduler"' in content
     assert 'MODELS_FILE="/root/.pi/agent/models.json"' in content
+    assert 'APPROVED_SKILLS_DIR="${PI_SCHEDULER_APPROVED_SKILLS_DIR:-/opt/pi-scheduler/approved-skills}"' in content
+    assert 'install -d -o root -g "$RUNTIME_GROUP" -m 0750 "$APPROVED_SKILLS_DIR"' in content
     assert "useradd" in content
     assert "usermod -aG" in content
     assert "chgrp -R" in content

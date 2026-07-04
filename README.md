@@ -133,11 +133,36 @@ pi --no-skills --no-session --name 'pi-scheduler: <job name>' -p "<prompt>"
 | | **Read-only** — `--tools read,grep,find,ls` (no `bash`) |
 | | **No tools** — `--no-tools` |
 | Skills policy | **No skills** — appends `--no-skills` |
-| | **Approved skill paths only** — appends `--no-skills --skill <path>` for each configured path |
+| | **Approved skills** — appends `--no-skills --skill <catalog path>` for each selected catalog skill |
 | | **Runtime user default skills** — lets Pi discover skills from the runtime user's normal Pi environment |
 
 Defaults for new jobs: Summary only, Do not save session, Full tools, No skills.  
 Legacy databases migrate existing jobs to safe skills behavior (`No skills`) while preserving older output/session/tool defaults.
+
+### Approved Skills Catalog
+
+Jobs run with `--no-skills` by default. To allow a job to use skills, install reviewed skills under the scheduler-managed catalog:
+
+```bash
+sudo install -d -o root -g pi-scheduler -m 0750 /opt/pi-scheduler/approved-skills
+sudo cp -a /source/pdf /opt/pi-scheduler/approved-skills/pdf
+sudo chown -R root:pi-scheduler /opt/pi-scheduler/approved-skills
+sudo chmod -R u=rwX,g=rX,o= /opt/pi-scheduler/approved-skills
+```
+
+Each catalog entry must be a direct child directory with `SKILL.md`:
+
+```text
+/opt/pi-scheduler/approved-skills/pdf/SKILL.md
+```
+
+The job form lists catalog skills as checkboxes. Jobs store skill IDs, not arbitrary paths. At runtime the scheduler invokes:
+
+```bash
+pi --no-skills --skill /opt/pi-scheduler/approved-skills/pdf ...
+```
+
+Use `Runtime user default skills` only for advanced cases where you intentionally want Pi to discover whatever skills are available to the runtime user.
 
 ### Work Windows
 
