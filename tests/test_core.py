@@ -1110,6 +1110,73 @@ def test_render_cron_file_uses_lightweight_group_query(tmp_path, monkeypatch):
     assert f"--group-id {disabled_group_id}" not in content
 
 
+def test_cron_status_preview_only_for_non_system_path(tmp_path, monkeypatch):
+    from app import cron_status
+
+    target = tmp_path / "tmp" / "pi-agent-jobs"
+    monkeypatch.setattr(config, "CRON_FILE", target)
+    monkeypatch.setattr(cron_status, "_cron_service_active", lambda: None)
+
+    status = cron_status.inspect("# generated\n")
+
+    assert status["status"] == "preview_only"
+    assert status["is_system_cron_path"] is False
+    assert any("outside /etc/cron.d" in warning for warning in status["warnings"])
+    assert any("PI_SCHEDULER_CRON_FILE=/etc/cron.d/pi-agent-jobs" in item for item in status["recommendations"])
+
+
+def test_cron_status_active_candidate_for_matching_system_file(tmp_path, monkeypatch):
+    from app import cron_status
+
+    target = tmp_path / "etc" / "cron.d" / "pi-agent-jobs"
+    target.parent.mkdir(parents=True)
+    content = "# generated\n* * * * * root echo ok\n"
+    target.write_text(content, encoding="utf-8")
+    monkeypatch.setattr(config, "CRON_FILE", target)
+    monkeypatch.setattr(cron_status, "SYSTEM_CRON_DIR", tmp_path / "etc" / "cron.d")
+    monkeypatch.setattr(cron_status, "_cron_service_active", lambda: True)
+
+    status = cron_status.inspect(content)
+
+    assert status["status"] == "active_candidate"
+    assert status["file_exists"] is True
+    assert status["content_matches"] is True
+    assert status["cron_service_active"] is True
+    assert status["warnings"] == []
+
+
+def test_cron_status_out_of_sync_for_different_existing_file(tmp_path, monkeypatch):
+    from app import cron_status
+
+    target = tmp_path / "etc" / "cron.d" / "pi-agent-jobs"
+    target.parent.mkdir(parents=True)
+    target.write_text("# old\n", encoding="utf-8")
+    monkeypatch.setattr(config, "CRON_FILE", target)
+    monkeypatch.setattr(cron_status, "SYSTEM_CRON_DIR", tmp_path / "etc" / "cron.d")
+    monkeypatch.setattr(cron_status, "_cron_service_active", lambda: True)
+
+    status = cron_status.inspect("# generated\n")
+
+    assert status["status"] == "out_of_sync"
+    assert status["content_matches"] is False
+    assert any("does not match" in warning for warning in status["warnings"])
+
+
+def test_cron_status_missing_for_system_target(tmp_path, monkeypatch):
+    from app import cron_status
+
+    target = tmp_path / "etc" / "cron.d" / "pi-agent-jobs"
+    monkeypatch.setattr(config, "CRON_FILE", target)
+    monkeypatch.setattr(cron_status, "SYSTEM_CRON_DIR", tmp_path / "etc" / "cron.d")
+    monkeypatch.setattr(cron_status, "_cron_service_active", lambda: True)
+
+    status = cron_status.inspect("# generated\n")
+
+    assert status["status"] == "missing"
+    assert status["file_exists"] is False
+    assert any("does not exist" in warning for warning in status["warnings"])
+
+
 def test_validate_cron_expr_rejects_six_fields():
     try:
         cron.validate_cron_expr("* * * * * *")
