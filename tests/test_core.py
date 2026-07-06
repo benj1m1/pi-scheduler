@@ -3411,6 +3411,16 @@ def test_read_log_limits_large_files(tmp_path):
     assert len(content) < 1100
 
 
+def test_log_boxes_wrap_unbroken_event_lines_within_viewport():
+    css = (Path(__file__).parents[1] / "app" / "static" / "styles.css").read_text(encoding="utf-8")
+    log_box_rule = css[css.index(".log-box {") : css.index(".log-head", css.index(".log-box {"))]
+
+    assert "max-width: 100%;" in log_box_rule
+    assert "min-width: 0;" in log_box_rule
+    assert "overflow-wrap: anywhere;" in log_box_rule
+    assert "word-break: break-word;" in log_box_rule
+
+
 def test_run_detail_marks_whether_jsonl_is_available(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
     monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
